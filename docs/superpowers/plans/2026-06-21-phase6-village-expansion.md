@@ -22,9 +22,8 @@ Status: implemented
 
 ## Notes
 
-- This is the first concrete Phase 6+ expansion step. Interest management remains a
-  separate network scalability pass; the current room broadcast remains acceptable for the
-  small-map prototype.
+- This was the first concrete Phase 6+ expansion step. Interest management is documented
+  and implemented in `2026-06-21-phase6-interest-management.md`.
 - New visual objects are still procedural Phaser graphics, matching the current art stack.
 
 ## Verification

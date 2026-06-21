@@ -4,8 +4,10 @@ import {
   Direction,
   ROOM_CONFIGS,
   WAITER_OBJECT_ID,
+  filterUsersByInterest,
   isJukeboxTrackId,
   isOrderItemId,
+  isPositionInInterestRange,
   nextJukeboxTrackId,
   normalizeChatText,
   normalizeJukeboxState,
@@ -13,10 +15,13 @@ import {
 } from '@social-square/shared';
 import type {
   AvatarState,
+  ChatMessage,
   ClientToServerEvents,
   EmoteId,
+  HeldItem,
   InterServerEvents,
   ObjectState,
+  RoomState,
   ServerToClientEvents,
   SocketData,
   AvatarConfig,
@@ -27,6 +32,7 @@ import { StateService } from '../../services/StateService';
 
 type IoServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type IoSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
+type RoomUser = RoomState['users'][number];
 
 const state = new StateService();
 const EMOTE_IDS = new Set<EmoteId>(['wave', 'dance', 'clap']);
@@ -56,6 +62,165 @@ function seatPositionFrom(value: ObjectState | undefined): Position | null {
 
 function isEmoteId(value: unknown): value is EmoteId {
   return typeof value === 'string' && EMOTE_IDS.has(value as EmoteId);
+}
+
+function usersById(users: RoomUser[]): Map<string, RoomUser> {
+  return new Map(users.map((user) => [user.userId, user]));
+}
+
+function canSeeUser(viewer: RoomUser, target: Pick<RoomUser, 'position'>): boolean {
+  return isPositionInInterestRange(viewer.position, target.position);
+}
+
+function userJoinedPayload(user: RoomUser): Parameters<ServerToClientEvents['user-joined']>[0] {
+  return {
+    userId: user.userId,
+    avatarConfig: user.avatarConfig,
+    position: user.position,
+    state: user.state,
+    heldItem: user.heldItem ?? null,
+  };
+}
+
+function filteredRoomStateForViewer(roomState: RoomState, viewer: RoomUser): RoomState {
+  return {
+    ...roomState,
+    totalUsers: roomState.totalUsers ?? roomState.users.length,
+    users: filterUsersByInterest(viewer, roomState.users),
+  };
+}
+
+async function emitUserJoinedToInterested(
+  io: IoServer,
+  roomId: string,
+  joined: RoomUser,
+  users: RoomUser[],
+): Promise<void> {
+  const byId = usersById(users);
+  const sockets = await io.in(roomId).fetchSockets();
+  for (const peer of sockets) {
+    const peerId = peer.data.userId;
+    if (!peerId || peerId === joined.userId) continue;
+    const viewer = byId.get(peerId);
+    if (viewer && canSeeUser(viewer, joined)) peer.emit('user-joined', userJoinedPayload(joined));
+  }
+}
+
+async function emitUserLeftToInterested(
+  io: IoServer,
+  roomId: string,
+  leaving: RoomUser,
+  users: RoomUser[],
+): Promise<void> {
+  const byId = usersById(users);
+  const sockets = await io.in(roomId).fetchSockets();
+  for (const peer of sockets) {
+    const peerId = peer.data.userId;
+    if (!peerId || peerId === leaving.userId) continue;
+    const viewer = byId.get(peerId);
+    if (viewer && canSeeUser(viewer, leaving)) peer.emit('user-left', { userId: leaving.userId });
+  }
+}
+
+async function emitPoseChangeWithInterest(
+  io: IoServer,
+  socket: IoSocket,
+  roomId: string,
+  movingUserId: string,
+  oldPosition: Position,
+  move: { x: number; y: number; direction: Direction; state: AvatarState },
+): Promise<void> {
+  const roomState = await state.getRoomState(roomId);
+  const byId = usersById(roomState.users);
+  const mover = byId.get(movingUserId);
+  if (!mover) return;
+
+  const oldMover = { ...mover, position: oldPosition };
+  const sockets = await io.in(roomId).fetchSockets();
+
+  for (const peerSocket of sockets) {
+    const peerId = peerSocket.data.userId;
+    if (!peerId || peerId === movingUserId) continue;
+
+    const peer = byId.get(peerId);
+    if (!peer) continue;
+
+    const wasMoverVisibleToPeer = canSeeUser(peer, oldMover);
+    const isMoverVisibleToPeer = canSeeUser(peer, mover);
+    if (isMoverVisibleToPeer) {
+      if (wasMoverVisibleToPeer) {
+        peerSocket.emit('user-moved', { userId: movingUserId, ...move });
+      } else {
+        peerSocket.emit('user-joined', userJoinedPayload(mover));
+      }
+    } else if (wasMoverVisibleToPeer) {
+      peerSocket.emit('user-left', { userId: movingUserId });
+    }
+
+    const wasPeerVisibleToMover = canSeeUser(oldMover, peer);
+    const isPeerVisibleToMover = canSeeUser(mover, peer);
+    if (isPeerVisibleToMover && !wasPeerVisibleToMover) {
+      socket.emit('user-joined', userJoinedPayload(peer));
+    } else if (!isPeerVisibleToMover && wasPeerVisibleToMover) {
+      socket.emit('user-left', { userId: peer.userId });
+    }
+  }
+}
+
+async function emitHeldItemToInterested(
+  io: IoServer,
+  roomId: string,
+  holder: RoomUser,
+  item: HeldItem,
+  users: RoomUser[],
+): Promise<void> {
+  const byId = usersById(users);
+  const sockets = await io.in(roomId).fetchSockets();
+  for (const peer of sockets) {
+    const peerId = peer.data.userId;
+    if (!peerId || peerId === holder.userId) continue;
+    const viewer = byId.get(peerId);
+    if (viewer && canSeeUser(viewer, holder)) peer.emit('user-held-item', { userId: holder.userId, item });
+  }
+}
+
+async function emitEmoteToInterested(
+  io: IoServer,
+  roomId: string,
+  sender: RoomUser,
+  emoteId: EmoteId,
+  users: RoomUser[],
+): Promise<void> {
+  const byId = usersById(users);
+  const sockets = await io.in(roomId).fetchSockets();
+  for (const peer of sockets) {
+    const peerId = peer.data.userId;
+    if (!peerId || peerId === sender.userId) continue;
+    const viewer = byId.get(peerId);
+    if (viewer && canSeeUser(viewer, sender)) peer.emit('user-emote', { userId: sender.userId, emoteId });
+  }
+}
+
+async function emitChatToInterested(
+  io: IoServer,
+  roomId: string,
+  sender: RoomUser,
+  message: ChatMessage,
+  users: RoomUser[],
+): Promise<void> {
+  const byId = usersById(users);
+  const sockets = await io.in(roomId).fetchSockets();
+  for (const peer of sockets) {
+    const peerId = peer.data.userId;
+    if (!peerId) continue;
+    if (peerId === sender.userId) {
+      peer.emit('user-chat-message', message);
+      continue;
+    }
+
+    const viewer = byId.get(peerId);
+    if (viewer && canSeeUser(viewer, sender)) peer.emit('user-chat-message', message);
+  }
 }
 
 function waiterRuntime(roomId: string): WaiterRuntime {
@@ -237,10 +402,12 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     const roomId = socket.data.currentRoom;
     if (!roomId) return;
     const clearedObjects = await state.clearObjectOccupancy(roomId, userId);
+    const roomState = await state.getRoomState(roomId);
+    const leavingUser = roomState.users.find((user) => user.userId === userId);
     await socket.leave(roomId);
     socket.data.currentRoom = undefined;
     await state.removeUser(roomId, userId);
-    socket.to(roomId).emit('user-left', { userId });
+    if (leavingUser) await emitUserLeftToInterested(io, roomId, leavingUser, roomState.users);
     for (const object of clearedObjects) {
       io.to(roomId).emit('object-state-changed', object);
     }
@@ -274,16 +441,11 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     socket.data.currentRoom = roomId;
     await state.addUser(roomId, userState);
 
-    // Send full room state only to the joining client
+    // Send an interest-filtered room state only to the joining client.
     const roomState = await state.getRoomState(roomId);
-    socket.emit('room-state', roomState);
+    socket.emit('room-state', filteredRoomStateForViewer(roomState, userState));
 
-    // Notify everyone else
-    socket.to(roomId).emit('user-joined', {
-      userId,
-      avatarConfig: userState.avatarConfig,
-      position: spawn,
-    });
+    await emitUserJoinedToInterested(io, roomId, userState, roomState.users);
 
     const newCount = await state.getUserCount(roomId);
     io.emit('room-users-count', { roomId, count: newCount });
@@ -299,8 +461,10 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     const roomId = socket.data.currentRoom;
     if (!roomId) return;
 
+    const roomState = await state.getRoomState(roomId);
+    const previous = roomState.users.find((user) => user.userId === userId)?.position ?? { x, y };
     await state.updatePose(roomId, userId, { x, y }, moveState);
-    socket.to(roomId).emit('user-moved', { userId, x, y, direction, state: moveState });
+    await emitPoseChangeWithInterest(io, socket, roomId, userId, previous, { x, y, direction, state: moveState });
   });
 
   socket.on('interact', async ({ objectId, action, payload }) => {
@@ -429,11 +593,19 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
           updatedAt: now,
         };
 
+        const roomState = await state.getRoomState(roomId);
+        const previous = roomState.users.find((user) => user.userId === userId)?.position ?? position;
         await state.updateObjectState(roomId, objectId, next);
         await state.updatePose(roomId, userId, position, 'sit');
         io.to(roomId).emit('object-state-changed', { objectId, state: next });
-        io.to(roomId).emit('user-moved', {
+        socket.emit('user-moved', {
           userId,
+          x: position.x,
+          y: position.y,
+          direction: Direction.SE,
+          state: 'sit' as AvatarState,
+        });
+        await emitPoseChangeWithInterest(io, socket, roomId, userId, previous, {
           x: position.x,
           y: position.y,
           direction: Direction.SE,
@@ -455,9 +627,17 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
 
         await state.updateObjectState(roomId, objectId, next);
         if (position) {
+          const roomState = await state.getRoomState(roomId);
+          const previous = roomState.users.find((user) => user.userId === userId)?.position ?? position;
           await state.updatePose(roomId, userId, position, 'idle');
-          io.to(roomId).emit('user-moved', {
+          socket.emit('user-moved', {
             userId,
+            x: position.x,
+            y: position.y,
+            direction: Direction.SE,
+            state: 'idle' as AvatarState,
+          });
+          await emitPoseChangeWithInterest(io, socket, roomId, userId, previous, {
             x: position.x,
             y: position.y,
             direction: Direction.SE,
@@ -477,27 +657,33 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     socket.emit('error', { code: 'UNKNOWN_INTERACTION', message: 'Oggetto sconosciuto' });
   });
 
-  socket.on('emote', ({ emoteId }) => {
+  socket.on('emote', async ({ emoteId }) => {
     const roomId = socket.data.currentRoom;
     if (!roomId || !isEmoteId(emoteId)) return;
-    socket.to(roomId).emit('user-emote', { userId, emoteId });
+    const roomState = await state.getRoomState(roomId);
+    const sender = roomState.users.find((user) => user.userId === userId);
+    if (sender) await emitEmoteToInterested(io, roomId, sender, emoteId, roomState.users);
   });
 
-  socket.on('chat-message', ({ text }) => {
+  socket.on('chat-message', async ({ text }) => {
     const roomId = socket.data.currentRoom;
     if (!roomId) return;
 
     const normalized = normalizeChatText(text);
     if (!normalized) return;
 
-    io.to(roomId).emit('user-chat-message', {
+    const roomState = await state.getRoomState(roomId);
+    const sender = roomState.users.find((user) => user.userId === userId);
+    if (!sender) return;
+
+    await emitChatToInterested(io, roomId, sender, {
       id: randomUUID(),
       roomId,
       userId,
       username,
       text: normalized,
       sentAt: Date.now(),
-    });
+    }, roomState.users);
   });
 
   socket.on('hold-item', async ({ item }) => {
@@ -505,7 +691,9 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     if (!roomId) return;
 
     await state.updateHeldItem(roomId, userId, item);
-    socket.to(roomId).emit('user-held-item', { userId, item });
+    const roomState = await state.getRoomState(roomId);
+    const holder = roomState.users.find((user) => user.userId === userId);
+    if (holder) await emitHeldItemToInterested(io, roomId, holder, item, roomState.users);
   });
 
   socket.on('disconnect', async () => {

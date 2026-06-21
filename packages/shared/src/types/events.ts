@@ -38,6 +38,8 @@ export type ObjectState = Record<string, unknown>;
 
 export interface RoomState {
   roomId: string;
+  /** Total users in the room, even when `users` is interest-filtered. */
+  totalUsers?: number;
   users: Array<{
     userId: string;
     avatarConfig: AvatarConfig;
@@ -65,7 +67,13 @@ export interface ClientToServerEvents {
 // Server → Client events
 export interface ServerToClientEvents {
   'room-state': (data: RoomState) => void;
-  'user-joined': (data: { userId: string; avatarConfig: AvatarConfig; position: Position }) => void;
+  'user-joined': (data: {
+    userId: string;
+    avatarConfig: AvatarConfig;
+    position: Position;
+    state?: AvatarState;
+    heldItem?: HeldItem;
+  }) => void;
   'user-left': (data: { userId: string }) => void;
   'user-moved': (data: { userId: string; x: number; y: number; direction: Direction; state: AvatarState }) => void;
   'object-state-changed': (data: { objectId: string; state: ObjectState }) => void;

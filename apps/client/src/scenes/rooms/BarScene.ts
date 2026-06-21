@@ -512,7 +512,7 @@ export class BarScene extends BaseRoomScene {
       },
 
       onRoomState: (roomState) => {
-        useGameStore.getState().setUsersInRoom(roomState.users.length);
+        useGameStore.getState().setUsersInRoom(roomState.totalUsers ?? roomState.users.length);
         roomState.objects.forEach((object) => this._applyObjectState(object.objectId, object.state));
         roomState.users.forEach((user) => {
           if (user.userId === this._myUserId) return;
@@ -527,9 +527,9 @@ export class BarScene extends BaseRoomScene {
         });
       },
 
-      onUserJoined: ({ userId, avatarConfig, position }) => {
+      onUserJoined: ({ userId, avatarConfig, position, state, heldItem }) => {
         if (userId === this._myUserId) return;
-        this._spawnRemote(userId, avatarConfig.username, position.x, position.y, null);
+        this._spawnRemote(userId, avatarConfig.username, position.x, position.y, heldItem ?? null, state ?? 'idle');
       },
 
       onUserLeft: ({ userId }) => {

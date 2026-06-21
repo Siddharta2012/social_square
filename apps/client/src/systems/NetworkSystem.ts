@@ -20,7 +20,13 @@ export interface NetworkCallbacks {
   onConnect?: (socketId: string) => void;
   onDisconnect?: () => void;
   onRoomState?: (state: RoomState) => void;
-  onUserJoined?: (data: { userId: string; avatarConfig: AvatarConfig; position: Position }) => void;
+  onUserJoined?: (data: {
+    userId: string;
+    avatarConfig: AvatarConfig;
+    position: Position;
+    state?: AvatarState;
+    heldItem?: HeldItem;
+  }) => void;
   onUserLeft?: (data: { userId: string }) => void;
   onUserMoved?: (data: {
     userId: string;
