@@ -1,3 +1,4 @@
+# Build: shared -> client -> server. Client dist is served statically by the server.
 [build]
 buildCommand = "pnpm install && pnpm --filter shared build && pnpm --filter client build && pnpm --filter server build"
 
