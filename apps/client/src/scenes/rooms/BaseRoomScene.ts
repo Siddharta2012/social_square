@@ -38,6 +38,9 @@ export abstract class BaseRoomScene extends Phaser.Scene {
   private _prevAvatarX = 0;
   private _prevAvatarY = 0;
   private _destroyed = false;
+  private _nightOverlay!: Phaser.GameObjects.Graphics;
+  private _ambientTime = 0;
+  private _lastNightFactor = -1;
 
   protected abstract getWorldConfig(): WorldConfig;
 
@@ -63,6 +66,9 @@ export abstract class BaseRoomScene extends Phaser.Scene {
 
     this._hoverGraphics = this.add.graphics();
     this._hoverGraphics.setDepth(-0.5);
+    this._nightOverlay = this.add.graphics();
+    this._nightOverlay.setScrollFactor(0);
+    this._nightOverlay.setDepth(900);
 
     void this._streamer.update(this._config.spawnX, this._config.spawnY).then(() => {
       if (this._destroyed) return;
@@ -75,6 +81,7 @@ export abstract class BaseRoomScene extends Phaser.Scene {
 
     this.scale.on('resize', (size: Phaser.Structs.Size) => {
       this.cameras.main.setSize(size.width, size.height);
+      this._drawNightOverlay(Math.max(this._lastNightFactor, 0));
     });
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -84,6 +91,7 @@ export abstract class BaseRoomScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
+    this._updateAtmosphere(delta / 1000);
     if (!this.localAvatar) return;
 
     this.movementSystem.update(delta / 1000);
@@ -188,7 +196,8 @@ export abstract class BaseRoomScene extends Phaser.Scene {
     const tileX = Math.floor(world.x + 0.5);
     const tileY = Math.floor(world.y + 0.5);
 
-    if (this.worldMap.getTile(tileX, tileY) === null) {
+    const tile = this.worldMap.getTile(tileX, tileY);
+    if (tile === null || tile.visible === false) {
       this._hoverGraphics.clear();
       this._hoveredTile = null;
       return;
@@ -198,7 +207,7 @@ export abstract class BaseRoomScene extends Phaser.Scene {
     this._hoveredTile = { x: tileX, y: tileY };
 
     this._hoverGraphics.clear();
-    const hoverColor = this.worldMap.isWalkable(tileX, tileY) ? 0xffffff : 0xff4444;
+    const hoverColor = tile.walkable ? 0xffffff : 0xff4444;
     const iso = IsometricSystem.worldToIso(tileX, tileY);
     const hw = IsometricSystem.TILE_HALF_W;
     const hh = IsometricSystem.TILE_HALF_H;
@@ -214,6 +223,28 @@ export abstract class BaseRoomScene extends Phaser.Scene {
   private _setupCamera(): void {
     this.cameraSystem.follow(this.localAvatar);
     this.cameraSystem.setLerp(1, 1);
+  }
+
+  private _updateAtmosphere(deltaSeconds: number): void {
+    const cycleSeconds = 140;
+    this._ambientTime = (this._ambientTime + deltaSeconds) % cycleSeconds;
+    const daylightWave = (Math.sin((this._ambientTime / cycleSeconds) * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+    const nightFactor = Phaser.Math.Clamp((daylightWave - 0.45) / 0.55, 0, 1);
+
+    if (Math.abs(nightFactor - this._lastNightFactor) < 0.01) return;
+    this._lastNightFactor = nightFactor;
+    this._renderer?.setNightFactor(nightFactor);
+    this._drawNightOverlay(nightFactor);
+  }
+
+  private _drawNightOverlay(nightFactor: number): void {
+    if (!this._nightOverlay) return;
+    this._nightOverlay.clear();
+    if (nightFactor <= 0.01) return;
+    this._nightOverlay.fillStyle(0x05081f, nightFactor * 0.42);
+    this._nightOverlay.fillRect(0, 0, this.scale.width, this.scale.height);
+    this._nightOverlay.fillStyle(0x2c3f73, nightFactor * 0.08);
+    this._nightOverlay.fillRect(0, 0, this.scale.width, this.scale.height);
   }
 
   private _setupBackButton(): void {

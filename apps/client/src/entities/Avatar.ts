@@ -47,8 +47,10 @@ export class Avatar extends Phaser.GameObjects.Container {
 
     // Ground shadow
     this._shadow = options.scene.add.graphics();
-    this._shadow.fillStyle(0x000000, 0.22);
-    this._shadow.fillEllipse(0, -3, 26, 8);
+    this._shadow.fillStyle(0x000000, 0.1);
+    this._shadow.fillEllipse(0, -2, 36, 12);
+    this._shadow.fillStyle(0x000000, 0.18);
+    this._shadow.fillEllipse(0, -3, 27, 8);
 
     // Human-shaped body (all drawn relative to feet at 0,0)
     this._gfx = options.scene.add.graphics();
