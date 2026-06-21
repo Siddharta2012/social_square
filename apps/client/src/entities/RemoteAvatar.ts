@@ -40,6 +40,17 @@ export class RemoteAvatar extends Avatar {
   ): void {
     this._targetWorldX = worldX;
     this._targetWorldY = worldY;
+    if (animState === 'sit') {
+      this.setWorldPosition(worldX, worldY);
+      this.playAnimation('sit');
+      return;
+    }
+
+    if (animState === 'wave' || animState === 'dance' || animState === 'clap') {
+      this.playEmote(animState);
+      return;
+    }
+
     const moving =
       animState === 'walk' ||
       Math.abs(this._targetWorldX - this._worldX) > 0.15 ||

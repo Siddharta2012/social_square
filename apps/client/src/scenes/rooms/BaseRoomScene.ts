@@ -6,6 +6,7 @@
  */
 
 import Phaser from 'phaser';
+import type { AvatarState } from '@social-square/shared';
 import { Avatar } from '../../entities/Avatar';
 import { CameraSystem } from '../../systems/CameraSystem';
 import { IsometricSystem } from '../../systems/IsometricSystem';
@@ -41,6 +42,11 @@ export abstract class BaseRoomScene extends Phaser.Scene {
   private _nightOverlay!: Phaser.GameObjects.Graphics;
   private _ambientTime = 0;
   private _lastNightFactor = -1;
+  private _cursorKeys: Phaser.Types.Input.Keyboard.CursorKeys | null = null;
+  private _wasdKeys: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key> | null = null;
+  private _keyboardStepCooldown = 0;
+  private _keyboardDriving = false;
+  private _localAvatarStateOverride: AvatarState | null = null;
 
   protected abstract getWorldConfig(): WorldConfig;
 
@@ -91,10 +97,12 @@ export abstract class BaseRoomScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    this._updateAtmosphere(delta / 1000);
+    const deltaSeconds = delta / 1000;
+    this._updateAtmosphere(deltaSeconds);
     if (!this.localAvatar) return;
 
-    this.movementSystem.update(delta / 1000);
+    this._updateKeyboardMovement(deltaSeconds);
+    this.movementSystem.update(deltaSeconds);
 
     const newX = this.movementSystem.posX;
     const newY = this.movementSystem.posY;
@@ -109,13 +117,36 @@ export abstract class BaseRoomScene extends Phaser.Scene {
       void this._streamer.update(Math.round(newX), Math.round(newY));
     }
 
-    this.localAvatar.playAnimation(this.movementSystem.isMoving ? 'walk' : 'idle');
+    this.localAvatar.playAnimation(this._currentAvatarState());
     this.isoSystem.update();
     this._updateHoverHighlight();
   }
 
   protected onLocalMove(_x: number, _y: number, _moving: boolean): void {
     // Subclasses can mirror local movement to networking or analytics.
+  }
+
+  protected onLocalMoveCommand(_targetX: number, _targetY: number): void {
+    // Subclasses can leave seats or cancel local actions before pathing starts.
+  }
+
+  protected onTileInteract(_tileX: number, _tileY: number): boolean {
+    return false;
+  }
+
+  protected setLocalAvatarState(state: AvatarState | null): void {
+    this._localAvatarStateOverride = state;
+    useGameStore.getState().setLocalAvatarState(state ?? 'idle');
+  }
+
+  protected setLocalAvatarTile(x: number, y: number, state: AvatarState | null = null): void {
+    if (!this.localAvatar) return;
+    this.movementSystem.setPosition(x, y);
+    this.localAvatar.setWorldPosition(x, y);
+    this.isoSystem.updatePosition(this.localAvatar, x, y);
+    this._prevAvatarX = x;
+    this._prevAvatarY = y;
+    this.setLocalAvatarState(state);
   }
 
   private _spawnAvatar(): void {
@@ -153,11 +184,79 @@ export abstract class BaseRoomScene extends Phaser.Scene {
       const tileX = Math.round(world.x);
       const tileY = Math.round(world.y);
 
-      if (this.worldMap.isWalkable(tileX, tileY)) this._spawnClickRipple(tileX, tileY);
-      this.movementSystem.moveTo(tileX, tileY);
+      if (this.onTileInteract(tileX, tileY)) return;
+      this._tryMoveToTile(tileX, tileY, true);
     });
 
+    this._cursorKeys = this.input.keyboard?.createCursorKeys() ?? null;
+    this._wasdKeys = this.input.keyboard?.addKeys({
+      up: Phaser.Input.Keyboard.KeyCodes.W,
+      down: Phaser.Input.Keyboard.KeyCodes.S,
+      left: Phaser.Input.Keyboard.KeyCodes.A,
+      right: Phaser.Input.Keyboard.KeyCodes.D,
+    }) as Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key> | null;
+
     this.cameraSystem.bindWheelZoom(this);
+  }
+
+  private _tryMoveToTile(tileX: number, tileY: number, ripple: boolean): boolean {
+    if (!this.worldMap.isWalkable(tileX, tileY)) {
+      this.movementSystem.moveTo(tileX, tileY);
+      return false;
+    }
+
+    this.onLocalMoveCommand(tileX, tileY);
+    const started = this.movementSystem.moveTo(tileX, tileY);
+    if (!started) return false;
+
+    this.setLocalAvatarState(null);
+    if (ripple) this._spawnClickRipple(tileX, tileY);
+    return true;
+  }
+
+  private _updateKeyboardMovement(deltaSeconds: number): void {
+    if (!this._cursorKeys || !this._wasdKeys || this._isDomTextInputFocused()) return;
+
+    this._keyboardStepCooldown = Math.max(0, this._keyboardStepCooldown - deltaSeconds);
+
+    const left = this._cursorKeys.left.isDown || this._wasdKeys.left.isDown;
+    const right = this._cursorKeys.right.isDown || this._wasdKeys.right.isDown;
+    const up = this._cursorKeys.up.isDown || this._wasdKeys.up.isDown;
+    const down = this._cursorKeys.down.isDown || this._wasdKeys.down.isDown;
+
+    const dx = (right ? 1 : 0) - (left ? 1 : 0);
+    const dy = (down ? 1 : 0) - (up ? 1 : 0);
+
+    if (dx === 0 && dy === 0) {
+      this._keyboardDriving = false;
+      return;
+    }
+
+    if (this.movementSystem.isMoving && !this._keyboardDriving) {
+      this.movementSystem.stopMovement();
+    }
+    if (this.movementSystem.isMoving || this._keyboardStepCooldown > 0) return;
+
+    const stepX = dx !== 0 ? dx : 0;
+    const stepY = dx === 0 ? dy : 0;
+    const targetX = Math.round(this.movementSystem.posX) + stepX;
+    const targetY = Math.round(this.movementSystem.posY) + stepY;
+
+    if (this._tryMoveToTile(targetX, targetY, false)) {
+      this._keyboardDriving = true;
+      this._keyboardStepCooldown = 0.03;
+    }
+  }
+
+  private _isDomTextInputFocused(): boolean {
+    const active = document.activeElement as HTMLElement | null;
+    const tag = active?.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+  }
+
+  private _currentAvatarState(): AvatarState {
+    if (this._localAvatarStateOverride) return this._localAvatarStateOverride;
+    return this.movementSystem.isMoving ? 'walk' : 'idle';
   }
 
   private _spawnClickRipple(tileX: number, tileY: number): void {
@@ -267,5 +366,6 @@ export abstract class BaseRoomScene extends Phaser.Scene {
   protected destroyWorld(): void {
     this._renderer?.destroyAll();
     useGameStore.getState().setWorldLoading(null);
+    useGameStore.getState().setLocalAvatarState('idle');
   }
 }

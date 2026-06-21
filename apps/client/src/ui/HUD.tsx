@@ -1,4 +1,5 @@
 import React from 'react';
+import type { EmoteId } from '@social-square/shared';
 import { useGameStore } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';
 import { AuthForm } from './AuthForm';
@@ -20,6 +21,8 @@ export const HUD: React.FC = () => {
   const setVoiceMuted = useGameStore((s) => s.setVoiceMuted);
   const heldItem = useGameStore((s) => s.heldItem);
   const worldLoading = useGameStore((s) => s.worldLoading);
+  const localAvatarState = useGameStore((s) => s.localAvatarState);
+  const jukeboxStatus = useGameStore((s) => s.jukeboxStatus);
   const username = useUserStore((s) => s.username);
   const setUser = useUserStore((s) => s.setUser);
 
@@ -40,6 +43,22 @@ export const HUD: React.FC = () => {
 
   const handleInputChange = (deviceId: string) => {
     eventBus.emit('audio-input-change', deviceId);
+  };
+
+  const emitEmote = (emoteId: EmoteId) => {
+    eventBus.emit('emote', emoteId);
+  };
+
+  const smallButtonStyle: React.CSSProperties = {
+    background: 'rgba(150,150,255,0.1)',
+    border: '1px solid rgba(150,150,255,0.35)',
+    color: '#aaaaff',
+    fontFamily: 'monospace',
+    fontSize: '11px',
+    height: '28px',
+    padding: '0 9px',
+    cursor: 'pointer',
+    borderRadius: '3px',
   };
 
   return (
@@ -110,7 +129,34 @@ export const HUD: React.FC = () => {
             Clicca su un tile per muoverti &nbsp;·&nbsp; Scroll per zoom
           </span>
 
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', minWidth: 0 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '5px',
+              color: jukeboxStatus?.blocked ? '#ffcc88' : '#aaaadd',
+              minWidth: 0, maxWidth: '260px',
+            }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {jukeboxStatus?.playing ? jukeboxStatus.title : 'Jukebox'}
+              </span>
+              <button style={smallButtonStyle} onClick={() => eventBus.emit('jukebox-toggle')}>
+                {jukeboxStatus?.playing ? 'Stop' : 'Play'}
+              </button>
+              <button style={smallButtonStyle} onClick={() => eventBus.emit('jukebox-next')}>
+                Next
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+              <button style={smallButtonStyle} onClick={() => emitEmote('wave')}>Saluta</button>
+              <button style={smallButtonStyle} onClick={() => emitEmote('dance')}>Balla</button>
+              <button style={smallButtonStyle} onClick={() => emitEmote('clap')}>Applauso</button>
+              {localAvatarState === 'sit' && (
+                <button style={smallButtonStyle} onClick={() => eventBus.emit('leave-seat')}>
+                  Alzati
+                </button>
+              )}
+            </div>
+
             {/* Audio settings gear */}
             <button
               onClick={() => setShowAudioSettings(true)}

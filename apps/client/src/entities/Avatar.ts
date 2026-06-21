@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import type { HeldItem } from '@social-square/shared';
+import type { AvatarState, EmoteId, HeldItem } from '@social-square/shared';
 import { IsometricSystem } from '../systems/IsometricSystem';
 import { SpeakingIndicator } from './SpeakingIndicator';
 
@@ -12,7 +12,7 @@ export interface AvatarOptions {
   isLocal?: boolean;
 }
 
-export type AvatarAnimState = 'idle' | 'walk';
+export type AvatarAnimState = AvatarState;
 
 export class Avatar extends Phaser.GameObjects.Container {
   readonly username: string;
@@ -30,7 +30,9 @@ export class Avatar extends Phaser.GameObjects.Container {
   private _animState: AvatarAnimState = 'idle';
   private _color: number;
   private _facingLeft = false;
+  private _bodyScaleY = 1;
   private _heldItem: HeldItem = null;
+  private _emoteText: Phaser.GameObjects.Text | null = null;
 
   static readonly SPRITE_W = 32;
   static readonly SPRITE_H = 48;
@@ -95,18 +97,68 @@ export class Avatar extends Phaser.GameObjects.Container {
   setFacing(facingLeft: boolean): void {
     if (this._facingLeft === facingLeft) return;
     this._facingLeft = facingLeft;
-    this._gfx.scaleX = facingLeft ? -1 : 1;
+    this._applyBodyScale();
   }
 
   // ── Animation ─────────────────────────────────────────────────────────────
 
   playAnimation(state: AvatarAnimState): void {
+    if (state === 'wave' || state === 'dance' || state === 'clap') {
+      this.playEmote(state);
+      return;
+    }
+
     if (this._animState === state) return;
     this._animState = state;
     if (state === 'walk') {
+      this._setBodyPose(0, 1);
       this._startWalkBob();
+    } else if (state === 'sit') {
+      this._stopWalkBob();
+      this._setBodyPose(7, 0.84);
     } else {
       this._stopWalkBob();
+      this._setBodyPose(0, 1);
+    }
+  }
+
+  playEmote(emoteId: EmoteId): void {
+    this._showEmoteLabel(emoteId);
+
+    if (emoteId === 'wave') {
+      this.scene.tweens.add({
+        targets: this._gfx,
+        angle: { from: 0, to: this._facingLeft ? 8 : -8 },
+        duration: 120,
+        yoyo: true,
+        repeat: 3,
+        ease: 'Sine.easeInOut',
+        onComplete: () => this._gfx.setAngle(0),
+      });
+    } else if (emoteId === 'dance') {
+      this.scene.tweens.add({
+        targets: [this._gfx, this._heldGfx],
+        x: { from: -3, to: 3 },
+        angle: { from: -4, to: 4 },
+        duration: 140,
+        yoyo: true,
+        repeat: 5,
+        ease: 'Sine.easeInOut',
+        onComplete: () => {
+          this._gfx.setX(0).setAngle(0);
+          this._heldGfx.setX(0).setAngle(0);
+        },
+      });
+    } else {
+      this.scene.tweens.add({
+        targets: this._heldGfx,
+        scaleX: { from: 1, to: 1.25 },
+        duration: 95,
+        yoyo: true,
+        repeat: 4,
+        ease: 'Quad.easeInOut',
+        onComplete: () => this._heldGfx.setScale(1),
+      });
     }
   }
 
@@ -229,6 +281,43 @@ export class Avatar extends Phaser.GameObjects.Container {
     g.fillCircle(4.2, -45.7, 0.6);
   }
 
+  private _setBodyPose(y: number, scaleY: number): void {
+    this._bodyScaleY = scaleY;
+    this._gfx.setY(y);
+    this._heldGfx.setY(y);
+    this._applyBodyScale();
+  }
+
+  private _applyBodyScale(): void {
+    this._gfx.setScale(this._facingLeft ? -1 : 1, this._bodyScaleY);
+  }
+
+  private _showEmoteLabel(emoteId: EmoteId): void {
+    const label = emoteId === 'wave' ? 'HI' : emoteId === 'dance' ? 'DANCE' : 'CLAP';
+    if (!this._emoteText) {
+      this._emoteText = this.scene.add.text(0, -Avatar.SPRITE_H - 26, label, {
+        fontSize: '10px',
+        color: '#fff4d0',
+        fontFamily: 'monospace',
+        stroke: '#201006',
+        strokeThickness: 3,
+        resolution: 2,
+      }).setOrigin(0.5, 1);
+      this.add(this._emoteText);
+    }
+
+    this._emoteText.setText(label);
+    this._emoteText.setAlpha(1);
+    this._emoteText.setY(-Avatar.SPRITE_H - 26);
+    this.scene.tweens.add({
+      targets: this._emoteText,
+      y: -Avatar.SPRITE_H - 42,
+      alpha: 0,
+      duration: 850,
+      ease: 'Quad.easeOut',
+    });
+  }
+
   private _startWalkBob(): void {
     if (this._walkTween) return;
     this._walkTween = this.scene.tweens.add({
@@ -245,8 +334,6 @@ export class Avatar extends Phaser.GameObjects.Container {
     if (this._walkTween) {
       this._walkTween.stop();
       this._walkTween = null;
-      this._gfx.setY(0);
-      this._heldGfx.setY(0);
     }
   }
 

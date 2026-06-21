@@ -11,7 +11,8 @@ export interface AvatarConfig {
   expression: number;
 }
 
-export type AvatarState = 'idle' | 'walk' | 'sit' | 'wave' | 'dance' | 'fish';
+export type AvatarState = 'idle' | 'walk' | 'sit' | 'wave' | 'dance' | 'clap' | 'fish';
+export type EmoteId = 'wave' | 'dance' | 'clap';
 
 /** Item currently held in the avatar's hand. */
 export type HeldItem = 'beer' | 'pretzel' | null;
@@ -54,8 +55,8 @@ export interface ClientToServerEvents {
   'join-room': (data: { roomId: string; avatarConfig: AvatarConfig }) => void;
   'leave-room': (data: { roomId: string }) => void;
   'move': (data: { x: number; y: number; direction: Direction; state: AvatarState }) => void;
-  'interact': (data: { objectId: string; action: string }) => void;
-  'emote': (data: { emoteId: string }) => void;
+  'interact': (data: { objectId: string; action: string; payload?: ObjectState }) => void;
+  'emote': (data: { emoteId: EmoteId }) => void;
   'hold-item': (data: { item: HeldItem }) => void;
 }
 
@@ -66,7 +67,7 @@ export interface ServerToClientEvents {
   'user-left': (data: { userId: string }) => void;
   'user-moved': (data: { userId: string; x: number; y: number; direction: Direction; state: AvatarState }) => void;
   'object-state-changed': (data: { objectId: string; state: ObjectState }) => void;
-  'user-emote': (data: { userId: string; emoteId: string }) => void;
+  'user-emote': (data: { userId: string; emoteId: EmoteId }) => void;
   'user-held-item': (data: { userId: string; item: HeldItem }) => void;
   'room-users-count': (data: { roomId: string; count: number }) => void;
   'error': (data: { code: string; message: string }) => void;

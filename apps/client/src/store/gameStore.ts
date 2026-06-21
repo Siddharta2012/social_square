@@ -1,7 +1,14 @@
 import { create } from 'zustand';
-import type { HeldItem } from '@social-square/shared';
+import type { AvatarState, HeldItem, JukeboxTrackId } from '@social-square/shared';
 
 export type WorldLoadingState = 'initial' | 'streaming' | null;
+
+export interface JukeboxStatus {
+  trackId: JukeboxTrackId;
+  title: string;
+  playing: boolean;
+  blocked: boolean;
+}
 
 interface GameState {
   isConnected: boolean;
@@ -26,6 +33,10 @@ interface GameState {
   setHeldItem: (item: HeldItem) => void;
   worldLoading: WorldLoadingState;
   setWorldLoading: (state: WorldLoadingState) => void;
+  localAvatarState: AvatarState;
+  setLocalAvatarState: (state: AvatarState) => void;
+  jukeboxStatus: JukeboxStatus | null;
+  setJukeboxStatus: (status: JukeboxStatus | null) => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -51,4 +62,8 @@ export const useGameStore = create<GameState>((set) => ({
   setHeldItem: (item) => set({ heldItem: item }),
   worldLoading: null,
   setWorldLoading: (state) => set({ worldLoading: state }),
+  localAvatarState: 'idle',
+  setLocalAvatarState: (state) => set({ localAvatarState: state }),
+  jukeboxStatus: null,
+  setJukeboxStatus: (status) => set({ jukeboxStatus: status }),
 }));

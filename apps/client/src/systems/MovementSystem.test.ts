@@ -12,7 +12,7 @@ describe('MovementSystem', () => {
     const grid = Array.from({ length: 3 }, () => [true, true, true]);
     const movement = new MovementSystem(gridWalkable(grid), 5);
     movement.setPosition(0, 0);
-    movement.moveTo(2, 0);
+    expect(movement.moveTo(2, 0)).toBe(true);
     expect(movement.isMoving).toBe(true);
   });
 
@@ -20,7 +20,7 @@ describe('MovementSystem', () => {
     const grid = [[true, false]];
     const movement = new MovementSystem(gridWalkable(grid), 5);
     movement.setPosition(0, 0);
-    movement.moveTo(1, 0);
+    expect(movement.moveTo(1, 0)).toBe(false);
     expect(movement.isMoving).toBe(false);
   });
 

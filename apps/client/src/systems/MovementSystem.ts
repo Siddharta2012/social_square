@@ -56,19 +56,20 @@ export class MovementSystem {
   }
 
   /** Request movement to target grid cell. Runs A* and starts walking. */
-  moveTo(targetX: number, targetY: number): void {
+  moveTo(targetX: number, targetY: number): boolean {
     const startX = Math.round(this._posX);
     const startY = Math.round(this._posY);
     const endX = Math.round(targetX);
     const endY = Math.round(targetY);
 
-    if (!this._isWalkable(endX, endY)) return;
+    if (!this._isWalkable(endX, endY)) return false;
 
     const path = this._aStar(startX, startY, endX, endY);
-    if (path.length === 0) return;
+    if (path.length === 0) return false;
 
     this._path = path;
     this._pathIndex = 0;
+    return true;
   }
 
   /** Call every frame with delta time in seconds. */
