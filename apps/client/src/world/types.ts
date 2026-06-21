@@ -9,7 +9,7 @@ export interface TileData {
   /** Optional raised top-face color for obstacles. */
   topColor?: number;
   /** Optional surface detail rendered on the tile. */
-  detail?: 'wood' | 'grass' | 'path' | 'stone' | 'hedge' | 'void';
+  detail?: 'wood' | 'grass' | 'path' | 'stone' | 'hedge' | 'water' | 'void';
   /** Optional detail stroke/dot color. */
   accentColor?: number;
 }
@@ -34,7 +34,8 @@ export type DecorationKind =
   | 'marketStall'
   | 'shopFront'
   | 'signpost'
-  | 'planter';
+  | 'planter'
+  | 'well';
 
 export interface DecorationData {
   kind: DecorationKind;

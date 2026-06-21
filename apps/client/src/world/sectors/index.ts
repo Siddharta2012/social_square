@@ -6,4 +6,6 @@ export const SECTOR_REGISTRY: SectorRegistry = {
   '0,1': () => import('./sector_0_1'),
   '1,0': () => import('./sector_1_0'),
   '1,1': () => import('./sector_1_1'),
+  '2,0': () => import('./sector_2_0'),
+  '2,1': () => import('./sector_2_1'),
 };

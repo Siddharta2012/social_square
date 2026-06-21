@@ -165,6 +165,11 @@ export class SectorRenderer {
       for (let i = 0; i <= seed; i++) {
         gfx.fillCircle(top.x - 14 + i * 11, top.y + 18 + ((gx + i) % 8), 1.2);
       }
+    } else if (tile.detail === 'water') {
+      gfx.lineStyle(1.5, accent, 0.35);
+      const waveOffset = ((gx * 5 + gy * 7) % 5) - 2;
+      gfx.lineBetween(left.x + 12, left.y + 3 + waveOffset, top.x + 5, top.y + 16 + waveOffset);
+      gfx.lineBetween(top.x + 8, top.y + 18 - waveOffset, right.x - 12, right.y + 2 - waveOffset);
     }
   }
 
@@ -267,6 +272,10 @@ export class SectorRenderer {
       case 'planter':
         this._drawPlanter(gfx, decoration);
         container.setDepth(IsometricSystem.depth(gx, gy) + 0.08);
+        break;
+      case 'well':
+        this._drawWell(gfx, decoration);
+        container.setDepth(IsometricSystem.depth(gx, gy) + 0.12);
         break;
     }
 
@@ -610,6 +619,29 @@ export class SectorRenderer {
       gfx.fillStyle(flower, 1);
       gfx.fillCircle(x, -30, 3);
     }
+  }
+
+  private _drawWell(gfx: Phaser.GameObjects.Graphics, decoration: DecorationData): void {
+    const stone = decoration.color ?? 0x7f8a91;
+    const roof = decoration.accentColor ?? 0x8a4b2a;
+    this._softShadow(gfx, 50, 14, 6);
+    gfx.fillStyle(this._shade(stone, 0.62), 1);
+    gfx.fillEllipse(0, -7, 44, 19);
+    gfx.fillStyle(stone, 1);
+    gfx.fillEllipse(0, -14, 40, 16);
+    gfx.fillStyle(0x22313b, 0.9);
+    gfx.fillEllipse(0, -16, 28, 9);
+    gfx.lineStyle(3, 0x5b3a22, 1);
+    gfx.lineBetween(-16, -16, -16, -48);
+    gfx.lineBetween(16, -16, 16, -48);
+    gfx.fillStyle(this._shade(roof, 0.72), 1);
+    gfx.fillTriangle(-28, -48, 0, -68, 28, -48);
+    gfx.fillStyle(roof, 1);
+    gfx.fillTriangle(-22, -50, 0, -63, 22, -50);
+    gfx.lineStyle(2, 0x2a1a12, 1);
+    gfx.lineBetween(-10, -38, 10, -38);
+    gfx.fillStyle(decoration.variant === 1 ? 0xd8c08a : 0xb88a55, 1);
+    gfx.fillRoundedRect(-5, -38, 10, 9, 2);
   }
 
   private _shade(color: number, factor: number): number {
