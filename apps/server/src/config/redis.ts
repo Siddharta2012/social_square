@@ -1,7 +1,8 @@
 import Redis from 'ioredis';
 
-const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
-const USE_MOCK = process.env.NODE_ENV !== 'production' && process.env.REDIS_MOCK === 'true';
+const REDIS_URL = process.env.REDIS_URL;
+// Use mock when explicitly requested OR when no Redis URL is configured
+const USE_MOCK = process.env.REDIS_MOCK === 'true' || !REDIS_URL;
 
 function createRedis(): Redis {
   if (USE_MOCK) {
@@ -11,7 +12,7 @@ function createRedis(): Redis {
     return new RedisMock();
   }
 
-  const client = new Redis(REDIS_URL, {
+  const client = new Redis(REDIS_URL ?? 'redis://localhost:6379', {
     maxRetriesPerRequest: 3,
     lazyConnect: true,
     enableReadyCheck: false,
