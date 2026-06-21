@@ -53,13 +53,16 @@ export class RemoteAvatar extends Avatar {
     const dy = this._targetWorldY - this._worldY;
 
     if (Math.abs(dx) < 0.02 && Math.abs(dy) < 0.02) {
-      // Snap to target when close enough
       if (this._worldX !== this._targetWorldX || this._worldY !== this._targetWorldY) {
         this.setWorldPosition(this._targetWorldX, this._targetWorldY);
         this.playAnimation('idle');
       }
       return;
     }
+
+    // Update facing: in iso space, negative screen-x movement = facing left
+    // iso.x = (worldX - worldY) * TILE_HALF_W → left when dx < 0 or dy > 0
+    this.setFacing(dx < 0 || (dx === 0 && dy > 0));
 
     this.setWorldPosition(this._worldX + dx * this._lerpFactor, this._worldY + dy * this._lerpFactor);
   }

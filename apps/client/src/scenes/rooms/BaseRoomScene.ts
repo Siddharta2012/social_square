@@ -52,6 +52,10 @@ export abstract class BaseRoomScene extends Phaser.Scene {
   /** Currently hovered tile */
   private _hoveredTile: { x: number; y: number } | null = null;
 
+  /** Previous avatar world position for facing direction */
+  private _prevAvatarX = 0;
+  private _prevAvatarY = 0;
+
   protected abstract getRoomConfig(): RoomConfig;
 
   // -----------------------------------------------------------------------
@@ -89,10 +93,18 @@ export abstract class BaseRoomScene extends Phaser.Scene {
     this.movementSystem.update(delta / 1000);
 
     // Sync avatar screen position from movement system
-    this.localAvatar.setWorldPosition(
-      this.movementSystem.posX,
-      this.movementSystem.posY,
-    );
+    const newX = this.movementSystem.posX;
+    const newY = this.movementSystem.posY;
+    this.localAvatar.setWorldPosition(newX, newY);
+
+    // Update facing direction based on movement delta
+    if (newX !== this._prevAvatarX || newY !== this._prevAvatarY) {
+      const dx = newX - this._prevAvatarX;
+      const dy = newY - this._prevAvatarY;
+      this.localAvatar.setFacing(dx < 0 || (dx === 0 && dy > 0));
+      this._prevAvatarX = newX;
+      this._prevAvatarY = newY;
+    }
 
     // Update animation state
     this.localAvatar.playAnimation(this.movementSystem.isMoving ? 'walk' : 'idle');
@@ -165,11 +177,18 @@ export abstract class BaseRoomScene extends Phaser.Scene {
     gfx.fillStyle(fillColor, 1);
     gfx.fillPoints([top, right, bottom, left], true);
 
-    // Outline
-    const strokeColor = walkable ? 0x000000 : 0xff0000;
-    const strokeAlpha = walkable ? 0.2 : 0.5;
-    gfx.lineStyle(1, strokeColor, strokeAlpha);
-    gfx.strokePoints([top, right, bottom, left], true);
+    if (walkable) {
+      // Bevel lighting: top-left edges catch light, bottom-right are in shadow
+      gfx.lineStyle(1.5, 0xffffff, 0.13);
+      gfx.lineBetween(left.x, left.y, top.x, top.y);
+      gfx.lineBetween(top.x, top.y, right.x, right.y);
+      gfx.lineStyle(1.5, 0x000000, 0.18);
+      gfx.lineBetween(right.x, right.y, bottom.x, bottom.y);
+      gfx.lineBetween(bottom.x, bottom.y, left.x, left.y);
+    } else {
+      gfx.lineStyle(1, 0x000000, 0.5);
+      gfx.strokePoints([top, right, bottom, left], true);
+    }
 
     // Obstacle top face (slightly raised look)
     if (!walkable) {
@@ -272,12 +291,48 @@ export abstract class BaseRoomScene extends Phaser.Scene {
         const { cols, rows } = this._roomConfig;
         if (tileX < 0 || tileY < 0 || tileX >= cols || tileY >= rows) return;
 
+        if (this._grid[tileY]?.[tileX]) {
+          this._spawnClickRipple(tileX, tileY);
+        }
         this.movementSystem.moveTo(tileX, tileY);
       },
     );
 
     // Wheel zoom
     this.cameraSystem.bindWheelZoom(this);
+  }
+
+  // -----------------------------------------------------------------------
+  // Click ripple
+  // -----------------------------------------------------------------------
+
+  private _spawnClickRipple(tileX: number, tileY: number): void {
+    const iso = IsometricSystem.worldToIso(tileX, tileY);
+    const hw = IsometricSystem.TILE_HALF_W;
+    const hh = IsometricSystem.TILE_HALF_H;
+    const gfx = this.add.graphics();
+    gfx.setDepth(-0.3);
+
+    const state = { t: 0 };
+    this.tweens.add({
+      targets: state,
+      t: 1,
+      duration: 380,
+      ease: 'Quad.easeOut',
+      onUpdate: () => {
+        const s = 0.15 + state.t * 0.95;
+        const alpha = (1 - state.t) * 0.75;
+        gfx.clear();
+        gfx.lineStyle(2, 0xffffff, alpha);
+        gfx.strokePoints([
+          { x: iso.x,          y: iso.y - hh * s },
+          { x: iso.x + hw * s, y: iso.y },
+          { x: iso.x,          y: iso.y + hh * s },
+          { x: iso.x - hw * s, y: iso.y },
+        ], true);
+      },
+      onComplete: () => gfx.destroy(),
+    });
   }
 
   // -----------------------------------------------------------------------
