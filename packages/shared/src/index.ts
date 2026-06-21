@@ -5,3 +5,4 @@ export * from './constants/jukebox';
 export * from './constants/chat';
 export * from './constants/waiter';
 export * from './constants/interest';
+export * from './constants/interactions';

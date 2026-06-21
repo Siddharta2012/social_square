@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  JUKEBOX_OBJECT_ID,
+  WAITER_OBJECT_ID,
+  filterObjectsByInterest,
   filterUsersByInterest,
+  isObjectVisibleToViewer,
   isPositionInInterestRange,
+  objectInterestPosition,
   positionToSector,
   sectorDistance,
 } from '@social-square/shared';
@@ -30,5 +35,39 @@ describe('interest management helpers', () => {
     const far = { userId: 'c', position: { x: 70, y: 14 } };
 
     expect(filterUsersByInterest(viewer, [far, nearby, viewer])).toEqual([nearby, viewer]);
+  });
+
+  it('resolves known object positions for sector interest checks', () => {
+    expect(objectInterestPosition({ objectId: 'seat:garden-bench-west', state: {} })).toEqual({ x: 7, y: 32 });
+    expect(objectInterestPosition({ objectId: JUKEBOX_OBJECT_ID, state: {} })).toEqual({ x: 16, y: 3 });
+    expect(objectInterestPosition({
+      objectId: WAITER_OBJECT_ID,
+      state: { kind: 'waiter', phase: 'approaching', x: 70, y: 14, updatedAt: 1000 },
+    })).toEqual({ x: 70, y: 14 });
+  });
+
+  it('filters positioned object state by viewer interest', () => {
+    const viewer = { userId: 'viewer', position: { x: 60, y: 14 } };
+    const nearbyObject = { objectId: 'notice:near', state: { x: 60, y: 14 } };
+    const farSeat = { objectId: 'seat:table-west', state: { kind: 'seat' } };
+
+    expect(filterObjectsByInterest(viewer, [farSeat, nearbyObject])).toEqual([nearbyObject]);
+  });
+
+  it('keeps room-wide waiter state visible even outside range', () => {
+    const viewer = { userId: 'bystander', position: { x: 9, y: 14 } };
+    const waiter = {
+      objectId: WAITER_OBJECT_ID,
+      state: {
+        kind: 'waiter',
+        phase: 'to-counter',
+        x: 70,
+        y: 14,
+        customerId: 'customer',
+        updatedAt: 1000,
+      },
+    };
+
+    expect(isObjectVisibleToViewer(viewer, waiter)).toBe(true);
   });
 });

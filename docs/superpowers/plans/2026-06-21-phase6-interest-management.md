@@ -25,9 +25,10 @@ Status: implemented
 
 ## Notes
 
-- Object state broadcasts remain room-wide for now. Seats, jukebox and waiter state are
-  shared world objects rather than player presence streams, and keeping them global avoids
-  stale interaction state while the world is still small.
+- Object state interest management is now split out in
+  `2026-06-22-phase6-object-interest-management.md`: seats and generic positioned objects
+  are filtered by sector interest, while jukebox and waiter remain room-wide for UX
+  continuity.
 - `user-joined` now optionally carries `state` and `heldItem`, so a user entering interest
   range can be spawned with the correct pose and item.
 

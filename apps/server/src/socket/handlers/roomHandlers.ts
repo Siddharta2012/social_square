@@ -2,16 +2,21 @@ import type { Server, Socket } from 'socket.io';
 import { randomUUID } from 'node:crypto';
 import {
   Direction,
+  JUKEBOX_OBJECT_ID,
   ROOM_CONFIGS,
   WAITER_OBJECT_ID,
+  filterObjectsByInterest,
   filterUsersByInterest,
   isJukeboxTrackId,
   isOrderItemId,
+  isObjectVisibleToViewer,
   isPositionInInterestRange,
+  isSeatObjectId,
   nextJukeboxTrackId,
   normalizeChatText,
   normalizeJukeboxState,
   normalizeWaiterState,
+  positionToSector,
 } from '@social-square/shared';
 import type {
   AvatarState,
@@ -33,10 +38,10 @@ import { StateService } from '../../services/StateService';
 type IoServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type IoSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type RoomUser = RoomState['users'][number];
+type RoomObject = RoomState['objects'][number];
 
 const state = new StateService();
 const EMOTE_IDS = new Set<EmoteId>(['wave', 'dance', 'clap']);
-const SEAT_PREFIX = 'seat:';
 const WAITER_HOME: Position = { x: 2, y: 1 };
 const WAITER_COUNTER: Position = { x: 2, y: 0 };
 const WAITER_TICK_MS = 260;
@@ -72,6 +77,12 @@ function canSeeUser(viewer: RoomUser, target: Pick<RoomUser, 'position'>): boole
   return isPositionInInterestRange(viewer.position, target.position);
 }
 
+function changedSector(a: Position, b: Position): boolean {
+  const sectorA = positionToSector(a);
+  const sectorB = positionToSector(b);
+  return sectorA.sx !== sectorB.sx || sectorA.sy !== sectorB.sy;
+}
+
 function userJoinedPayload(user: RoomUser): Parameters<ServerToClientEvents['user-joined']>[0] {
   return {
     userId: user.userId,
@@ -87,7 +98,32 @@ function filteredRoomStateForViewer(roomState: RoomState, viewer: RoomUser): Roo
     ...roomState,
     totalUsers: roomState.totalUsers ?? roomState.users.length,
     users: filterUsersByInterest(viewer, roomState.users),
+    objects: filterObjectsByInterest(viewer, roomState.objects),
   };
+}
+
+async function emitObjectStateChangedToInterested(
+  io: IoServer,
+  roomId: string,
+  object: RoomObject,
+  users?: RoomUser[],
+): Promise<void> {
+  const roomUsers = users ?? (await state.getRoomState(roomId)).users;
+  const byId = usersById(roomUsers);
+  const sockets = await io.in(roomId).fetchSockets();
+
+  for (const peer of sockets) {
+    const peerId = peer.data.userId;
+    if (!peerId) continue;
+    const viewer = byId.get(peerId);
+    if (viewer && isObjectVisibleToViewer(viewer, object)) peer.emit('object-state-changed', object);
+  }
+}
+
+function syncObjectsForViewer(socket: IoSocket, roomState: RoomState, viewer: RoomUser): void {
+  for (const object of filterObjectsByInterest(viewer, roomState.objects)) {
+    socket.emit('object-state-changed', object);
+  }
 }
 
 async function emitUserJoinedToInterested(
@@ -165,6 +201,8 @@ async function emitPoseChangeWithInterest(
       socket.emit('user-left', { userId: peer.userId });
     }
   }
+
+  if (changedSector(oldPosition, mover.position)) syncObjectsForViewer(socket, roomState, mover);
 }
 
 async function emitHeldItemToInterested(
@@ -251,7 +289,7 @@ function scheduleWaiter(roomId: string, callback: () => void, delay: number): vo
 async function emitWaiterState(io: IoServer, roomId: string, nextState: WaiterState): Promise<void> {
   const objectState = nextState as unknown as ObjectState;
   await state.updateObjectState(roomId, WAITER_OBJECT_ID, objectState);
-  io.to(roomId).emit('object-state-changed', { objectId: WAITER_OBJECT_ID, state: objectState });
+  await emitObjectStateChangedToInterested(io, roomId, { objectId: WAITER_OBJECT_ID, state: objectState });
 }
 
 function isWaiterBusy(waiter: WaiterState, now: number): boolean {
@@ -409,7 +447,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     await state.removeUser(roomId, userId);
     if (leavingUser) await emitUserLeftToInterested(io, roomId, leavingUser, roomState.users);
     for (const object of clearedObjects) {
-      io.to(roomId).emit('object-state-changed', object);
+      await emitObjectStateChangedToInterested(io, roomId, object, roomState.users);
     }
     const count = await state.getUserCount(roomId);
     io.emit('room-users-count', { roomId, count });
@@ -516,7 +554,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
       return;
     }
 
-    if (objectId === 'jukebox') {
+    if (objectId === JUKEBOX_OBJECT_ID) {
       const now = Date.now();
       const current = normalizeJukeboxState(await state.getObjectState(roomId, objectId), now);
       let next = current;
@@ -564,11 +602,11 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
       }
 
       await state.updateObjectState(roomId, objectId, next as unknown as ObjectState);
-      io.to(roomId).emit('object-state-changed', { objectId, state: next as unknown as ObjectState });
+      await emitObjectStateChangedToInterested(io, roomId, { objectId, state: next as unknown as ObjectState });
       return;
     }
 
-    if (objectId.startsWith(SEAT_PREFIX)) {
+    if (isSeatObjectId(objectId)) {
       const current = await state.getObjectState(roomId, objectId) ?? {};
       const occupiedBy = typeof current.occupiedBy === 'string' ? current.occupiedBy : null;
       const now = Date.now();
@@ -597,7 +635,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         const previous = roomState.users.find((user) => user.userId === userId)?.position ?? position;
         await state.updateObjectState(roomId, objectId, next);
         await state.updatePose(roomId, userId, position, 'sit');
-        io.to(roomId).emit('object-state-changed', { objectId, state: next });
+        await emitObjectStateChangedToInterested(io, roomId, { objectId, state: next }, roomState.users);
         socket.emit('user-moved', {
           userId,
           x: position.x,
@@ -646,7 +684,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         } else {
           await state.updateAvatarState(roomId, userId, 'idle');
         }
-        io.to(roomId).emit('object-state-changed', { objectId, state: next });
+        await emitObjectStateChangedToInterested(io, roomId, { objectId, state: next });
         return;
       }
 
