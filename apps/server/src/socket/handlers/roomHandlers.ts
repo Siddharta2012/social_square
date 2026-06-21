@@ -84,6 +84,14 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     socket.to(roomId).emit('user-moved', { userId, x, y, direction, state: moveState });
   });
 
+  socket.on('hold-item', async ({ item }) => {
+    const roomId = socket.data.currentRoom;
+    if (!roomId) return;
+
+    await state.updateHeldItem(roomId, userId, item);
+    socket.to(roomId).emit('user-held-item', { userId, item });
+  });
+
   socket.on('disconnect', async () => {
     await leaveCurrentRoom();
     console.log(`[Socket] Disconnected: ${username} (${socket.id})`);

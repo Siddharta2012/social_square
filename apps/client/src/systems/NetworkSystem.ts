@@ -5,6 +5,7 @@ import type {
   AvatarConfig,
   AvatarState,
   Direction,
+  HeldItem,
   Position,
   RoomState,
 } from '@social-square/shared';
@@ -26,6 +27,7 @@ export interface NetworkCallbacks {
     state: AvatarState;
   }) => void;
   onRoomUsersCount?: (data: { roomId: string; count: number }) => void;
+  onUserHeldItem?: (data: { userId: string; item: HeldItem }) => void;
   onError?: (data: { code: string; message: string }) => void;
 }
 
@@ -60,6 +62,7 @@ export class NetworkSystem {
     this._socket.on('user-left', (data) => this._callbacks.onUserLeft?.(data));
     this._socket.on('user-moved', (data) => this._callbacks.onUserMoved?.(data));
     this._socket.on('room-users-count', (data) => this._callbacks.onRoomUsersCount?.(data));
+    this._socket.on('user-held-item', (data) => this._callbacks.onUserHeldItem?.(data));
     this._socket.on('error', (data) => this._callbacks.onError?.(data));
   }
 
@@ -81,6 +84,10 @@ export class NetworkSystem {
 
   leaveRoom(roomId: string): void {
     this._socket?.emit('leave-room', { roomId });
+  }
+
+  emitHoldItem(item: HeldItem): void {
+    this._socket?.emit('hold-item', { item });
   }
 
   /** Throttled to MOVE_EMIT_INTERVAL ms. */

@@ -283,6 +283,10 @@ export abstract class BaseRoomScene extends Phaser.Scene {
         // Only handle left-click on the game canvas (not UI)
         if (pointer.button !== 0) return;
 
+        // Skip movement if an interactive station was clicked
+        const hits = this.input.hitTestPointer(pointer);
+        if (hits.some((o) => o.getData('interactable'))) return;
+
         const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
         const world = IsometricSystem.isoToWorld(worldPoint.x, worldPoint.y);
         const tileX = Math.round(world.x);

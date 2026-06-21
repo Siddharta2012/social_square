@@ -1,5 +1,5 @@
 import { redis } from '../config/redis';
-import type { AvatarConfig, AvatarState, Position, RoomState } from '@social-square/shared';
+import type { AvatarConfig, AvatarState, HeldItem, Position, RoomState } from '@social-square/shared';
 
 interface UserState {
   userId: string;
@@ -7,6 +7,7 @@ interface UserState {
   avatarConfig: AvatarConfig;
   position: Position;
   state: AvatarState;
+  heldItem?: HeldItem;
 }
 
 const TTL = 3600; // 1 hour — auto-cleanup if server crashes
@@ -32,6 +33,15 @@ export class StateService {
     if (!raw) return;
     const userState: UserState = JSON.parse(raw);
     userState.position = position;
+    await redis.hset(k, userId, JSON.stringify(userState));
+  }
+
+  async updateHeldItem(roomId: string, userId: string, heldItem: HeldItem): Promise<void> {
+    const k = this.key(roomId);
+    const raw = await redis.hget(k, userId);
+    if (!raw) return;
+    const userState: UserState = JSON.parse(raw);
+    userState.heldItem = heldItem;
     await redis.hset(k, userId, JSON.stringify(userState));
   }
 

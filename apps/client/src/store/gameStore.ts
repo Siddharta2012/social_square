@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { HeldItem } from '@social-square/shared';
 
 interface GameState {
   isConnected: boolean;
@@ -19,6 +20,8 @@ interface GameState {
   setVoiceMuted: (v: boolean) => void;
   showAudioSettings: boolean;
   setShowAudioSettings: (v: boolean) => void;
+  heldItem: HeldItem;
+  setHeldItem: (item: HeldItem) => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -40,4 +43,6 @@ export const useGameStore = create<GameState>((set) => ({
   setVoiceMuted: (v) => set({ voiceMuted: v }),
   showAudioSettings: false,
   setShowAudioSettings: (v) => set({ showAudioSettings: v }),
+  heldItem: null,
+  setHeldItem: (item) => set({ heldItem: item }),
 }));

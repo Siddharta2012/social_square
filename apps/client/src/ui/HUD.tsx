@@ -18,6 +18,7 @@ export const HUD: React.FC = () => {
   const voiceAvailable = useGameStore((s) => s.voiceAvailable);
   const voiceMuted = useGameStore((s) => s.voiceMuted);
   const setVoiceMuted = useGameStore((s) => s.setVoiceMuted);
+  const heldItem = useGameStore((s) => s.heldItem);
   const username = useUserStore((s) => s.username);
   const setUser = useUserStore((s) => s.setUser);
 
@@ -152,6 +153,36 @@ export const HUD: React.FC = () => {
               Esci
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Held-item prompt — centered above the bottom bar */}
+      {inRoom && heldItem && (
+        <div style={{
+          position: 'absolute', bottom: '52px', left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(10,10,30,0.9)',
+          border: '1px solid rgba(255,225,77,0.5)',
+          borderRadius: '6px',
+          padding: '6px 14px',
+          color: '#fff4d0',
+          fontFamily: 'monospace',
+          fontSize: '12px',
+          whiteSpace: 'nowrap',
+          pointerEvents: 'none',
+          display: 'flex', alignItems: 'center', gap: '8px',
+        }}>
+          <span style={{ fontSize: '16px' }}>{heldItem === 'beer' ? '🍺' : '🥨'}</span>
+          Premi
+          <kbd style={{
+            background: 'rgba(255,225,77,0.18)',
+            border: '1px solid rgba(255,225,77,0.6)',
+            borderRadius: '3px',
+            padding: '1px 7px',
+            color: '#ffe14d',
+            fontWeight: 'bold',
+          }}>B</kbd>
+          per {heldItem === 'beer' ? 'bere' : 'mangiare'}
         </div>
       )}
 

@@ -13,6 +13,9 @@ export interface AvatarConfig {
 
 export type AvatarState = 'idle' | 'walk' | 'sit' | 'wave' | 'dance' | 'fish';
 
+/** Item currently held in the avatar's hand. */
+export type HeldItem = 'beer' | 'pretzel' | null;
+
 export enum Direction {
   SE = 0,
   S = 1,
@@ -38,6 +41,7 @@ export interface RoomState {
     avatarConfig: AvatarConfig;
     position: Position;
     state: AvatarState;
+    heldItem?: HeldItem;
   }>;
   objects: Array<{
     objectId: string;
@@ -52,6 +56,7 @@ export interface ClientToServerEvents {
   'move': (data: { x: number; y: number; direction: Direction; state: AvatarState }) => void;
   'interact': (data: { objectId: string; action: string }) => void;
   'emote': (data: { emoteId: string }) => void;
+  'hold-item': (data: { item: HeldItem }) => void;
 }
 
 // Server → Client events
@@ -62,6 +67,7 @@ export interface ServerToClientEvents {
   'user-moved': (data: { userId: string; x: number; y: number; direction: Direction; state: AvatarState }) => void;
   'object-state-changed': (data: { objectId: string; state: ObjectState }) => void;
   'user-emote': (data: { userId: string; emoteId: string }) => void;
+  'user-held-item': (data: { userId: string; item: HeldItem }) => void;
   'room-users-count': (data: { roomId: string; count: number }) => void;
   'error': (data: { code: string; message: string }) => void;
 }
