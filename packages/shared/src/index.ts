@@ -3,3 +3,4 @@ export * from './types/room';
 export * from './constants/rooms';
 export * from './constants/jukebox';
 export * from './constants/chat';
+export * from './constants/waiter';

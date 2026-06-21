@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CHAT_MAX_LENGTH, normalizeChatText } from '@social-square/shared';
+import { CHAT_MAX_LENGTH, ORDER_ITEMS, normalizeChatText, orderItemLabel } from '@social-square/shared';
 import type { EmoteId } from '@social-square/shared';
 import { useGameStore } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';
@@ -25,6 +25,8 @@ export const HUD: React.FC = () => {
   const localAvatarState = useGameStore((s) => s.localAvatarState);
   const jukeboxStatus = useGameStore((s) => s.jukeboxStatus);
   const chatMessages = useGameStore((s) => s.chatMessages);
+  const waiterStatus = useGameStore((s) => s.waiterStatus);
+  const userId = useUserStore((s) => s.userId);
   const username = useUserStore((s) => s.username);
   const setUser = useUserStore((s) => s.setUser);
   const [chatDraft, setChatDraft] = useState('');
@@ -58,6 +60,23 @@ export const HUD: React.FC = () => {
     eventBus.emit('chat-send', text);
     setChatDraft('');
   };
+
+  const waiterIsMine = waiterStatus?.customerId === userId;
+  const waiterCanCall = !waiterStatus || waiterStatus.phase === 'idle' || waiterStatus.phase === 'delivered';
+  const waiterAwaitingOrder = waiterStatus?.phase === 'awaiting-order' && waiterIsMine;
+  const waiterLabel = waiterCanCall
+    ? 'Cameriere'
+    : waiterStatus?.phase === 'approaching'
+      ? 'Arrivo...'
+      : waiterStatus?.phase === 'awaiting-order'
+        ? waiterIsMine ? 'Scegli' : 'Occupato'
+        : waiterStatus?.phase === 'to-counter'
+          ? 'Al bancone'
+          : waiterStatus?.phase === 'delivering'
+            ? 'In consegna'
+            : waiterStatus?.phase === 'returning'
+              ? 'Rientro'
+              : 'Cameriere';
 
   const smallButtonStyle: React.CSSProperties = {
     background: 'rgba(150,150,255,0.1)',
@@ -160,6 +179,20 @@ export const HUD: React.FC = () => {
               <button style={smallButtonStyle} onClick={() => emitEmote('wave')}>Saluta</button>
               <button style={smallButtonStyle} onClick={() => emitEmote('dance')}>Balla</button>
               <button style={smallButtonStyle} onClick={() => emitEmote('clap')}>Applauso</button>
+              <button
+                style={{
+                  ...smallButtonStyle,
+                  color: waiterAwaitingOrder ? '#ffe14d' : '#aaaaff',
+                  borderColor: waiterAwaitingOrder ? 'rgba(255,225,77,0.55)' : 'rgba(150,150,255,0.35)',
+                  opacity: waiterCanCall || waiterIsMine ? 1 : 0.62,
+                }}
+                disabled={!waiterCanCall && !waiterIsMine}
+                onClick={() => {
+                  if (waiterCanCall) eventBus.emit('waiter-call');
+                }}
+              >
+                {waiterLabel}
+              </button>
               {localAvatarState === 'sit' && (
                 <button style={smallButtonStyle} onClick={() => eventBus.emit('leave-seat')}>
                   Alzati
@@ -324,6 +357,40 @@ export const HUD: React.FC = () => {
               Invia
             </button>
           </form>
+        </div>
+      )}
+
+      {/* Order menu */}
+      {inRoom && waiterAwaitingOrder && (
+        <div style={{
+          position: 'absolute',
+          right: '16px',
+          bottom: '52px',
+          zIndex: 120,
+          background: 'rgba(10,10,30,0.92)',
+          border: '1px solid rgba(255,225,77,0.42)',
+          borderRadius: '6px',
+          padding: '8px',
+          display: 'flex',
+          gap: '7px',
+          alignItems: 'center',
+          pointerEvents: 'auto',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.28)',
+        }}>
+          <span style={{ color: '#fff4d0', fontSize: '11px' }}>Ordina</span>
+          {ORDER_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              style={{
+                ...smallButtonStyle,
+                color: '#ffe14d',
+                borderColor: 'rgba(255,225,77,0.45)',
+              }}
+              onClick={() => eventBus.emit('waiter-order', item.id)}
+            >
+              {orderItemLabel(item.id)}
+            </button>
+          ))}
         </div>
       )}
 

@@ -6,9 +6,11 @@
 
 import {
   Direction,
+  WAITER_OBJECT_ID,
   jukeboxTitle,
   nextJukeboxTrackId,
   normalizeJukeboxState,
+  normalizeWaiterState,
 } from '@social-square/shared';
 import type {
   AvatarConfig,
@@ -18,6 +20,8 @@ import type {
   HeldItem,
   JukeboxState,
   ObjectState,
+  OrderItemId,
+  WaiterState,
 } from '@social-square/shared';
 import { JukeboxPlayer } from '../../audio/JukeboxPlayer';
 import { useUserStore } from '../../store/userStore';
@@ -95,6 +99,9 @@ export class BarScene extends BaseRoomScene {
   private _pendingSeat: SeatDefinition | null = null;
   private _seatedSeatId: string | null = null;
   private _noticeText: Phaser.GameObjects.Text | null = null;
+  private _waiterAvatar: RemoteAvatar | null = null;
+  private _waiterState: WaiterState = normalizeWaiterState(null);
+  private _deliveredOrderIds = new Set<string>();
 
   private static readonly BEER_SIPS = 3;
   private static readonly PRETZEL_BITES = 2;
@@ -154,6 +161,8 @@ export class BarScene extends BaseRoomScene {
     eventBus.on('jukebox-toggle', () => this._requestJukeboxToggle(), this);
     eventBus.on('jukebox-next', () => this._requestJukeboxNext(), this);
     eventBus.on('chat-send', (text: string) => this._sendChatMessage(text), this);
+    eventBus.on('waiter-call', () => this._callWaiter(), this);
+    eventBus.on('waiter-order', (item: OrderItemId) => this._placeWaiterOrder(item), this);
     useGameStore.getState().clearChatMessages();
 
     this._createStations();
@@ -171,6 +180,7 @@ export class BarScene extends BaseRoomScene {
   update(time: number, delta: number): void {
     super.update(time, delta);
     this._remoteAvatars.forEach((avatar) => avatar.tick());
+    this._waiterAvatar?.tick();
     this._updatePendingSeat();
   }
 
@@ -313,6 +323,64 @@ export class BarScene extends BaseRoomScene {
     this._remoteAvatars.get(message.userId)?.showChatBubble(message.text);
   }
 
+  private _callWaiter(): void {
+    if (!this.localAvatar) return;
+    this._network?.emitInteract(WAITER_OBJECT_ID, 'waiter-call', {
+      x: Math.round(this.movementSystem.posX),
+      y: Math.round(this.movementSystem.posY),
+    });
+  }
+
+  private _placeWaiterOrder(item: OrderItemId): void {
+    this._network?.emitInteract(WAITER_OBJECT_ID, 'waiter-order', {
+      item,
+      x: Math.round(this.movementSystem.posX),
+      y: Math.round(this.movementSystem.posY),
+    });
+  }
+
+  private _ensureWaiterAvatar(waiter: WaiterState): RemoteAvatar {
+    if (this._waiterAvatar) return this._waiterAvatar;
+
+    const avatar = new RemoteAvatar({
+      scene: this,
+      username: 'Cameriere',
+      worldX: waiter.x,
+      worldY: waiter.y,
+    });
+    this._waiterAvatar = avatar;
+    this.isoSystem.register(avatar, waiter.x, waiter.y);
+    return avatar;
+  }
+
+  private _applyWaiterState(rawState: unknown): void {
+    const waiter = normalizeWaiterState(rawState);
+    this._waiterState = waiter;
+    useGameStore.getState().setWaiterStatus(waiter);
+
+    const avatar = this._ensureWaiterAvatar(waiter);
+    const moving = waiter.phase === 'approaching' ||
+      waiter.phase === 'to-counter' ||
+      waiter.phase === 'delivering' ||
+      waiter.phase === 'returning';
+    avatar.updateTarget(waiter.x, waiter.y, Direction.SE, moving ? 'walk' : 'idle');
+    avatar.setHeldItem(waiter.phase === 'delivering' || waiter.phase === 'delivered'
+      ? waiter.item ?? null
+      : null);
+
+    if (
+      waiter.phase === 'delivered' &&
+      waiter.customerId === this._myUserId &&
+      waiter.orderId &&
+      waiter.item &&
+      !this._deliveredOrderIds.has(waiter.orderId)
+    ) {
+      this._deliveredOrderIds.add(waiter.orderId);
+      this._pickUp(waiter.item);
+      this._showNotice(`${waiter.item === 'beer' ? 'Birra' : 'Pretzel'} consegnato`);
+    }
+  }
+
   private _requestJukeboxToggle(): void {
     const now = Date.now();
     const next: JukeboxState = {
@@ -354,6 +422,10 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _applyObjectState(objectId: string, objectState: ObjectState): void {
+    if (objectId === WAITER_OBJECT_ID) {
+      this._applyWaiterState(objectState);
+      return;
+    }
     if (objectId === JUKEBOX_OBJECT_ID) {
       void this._applyJukeboxState(objectState);
       return;
@@ -565,6 +637,8 @@ export class BarScene extends BaseRoomScene {
     eventBus.off('jukebox-toggle');
     eventBus.off('jukebox-next');
     eventBus.off('chat-send');
+    eventBus.off('waiter-call');
+    eventBus.off('waiter-order');
     this.input.keyboard?.off('keydown-B');
     this.input.keyboard?.off('keydown-ONE');
     this.input.keyboard?.off('keydown-TWO');
@@ -576,6 +650,8 @@ export class BarScene extends BaseRoomScene {
     void this._voice?.disconnect();
     this._remoteAvatars.forEach((a) => a.destroy());
     this._remoteAvatars.clear();
+    this._waiterAvatar?.destroy();
+    this._waiterAvatar = null;
     this._stations.forEach((s) => s.destroy());
     this._stations = [];
     this._seatOccupants.clear();
@@ -583,6 +659,7 @@ export class BarScene extends BaseRoomScene {
     this._seatedSeatId = null;
     this._noticeText?.destroy();
     this._noticeText = null;
+    this._deliveredOrderIds.clear();
     this.destroyWorld();
     this.input.setDefaultCursor('default');
     useGameStore.getState().setConnected(false);
@@ -595,5 +672,6 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().setJukeboxStatus(null);
     useGameStore.getState().setLocalAvatarState('idle');
     useGameStore.getState().clearChatMessages();
+    useGameStore.getState().setWaiterStatus(null);
   }
 }
