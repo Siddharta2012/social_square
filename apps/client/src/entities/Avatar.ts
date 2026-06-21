@@ -33,6 +33,7 @@ export class Avatar extends Phaser.GameObjects.Container {
   private _bodyScaleY = 1;
   private _heldItem: HeldItem = null;
   private _emoteText: Phaser.GameObjects.Text | null = null;
+  private _chatBubble: Phaser.GameObjects.Container | null = null;
 
   static readonly SPRITE_W = 32;
   static readonly SPRITE_H = 48;
@@ -164,6 +165,60 @@ export class Avatar extends Phaser.GameObjects.Container {
 
   setSpeaking(speaking: boolean): void {
     speaking ? this._speakingIndicator.show() : this._speakingIndicator.hide();
+  }
+
+  showChatBubble(message: string): void {
+    const text = message.trim();
+    if (!text) return;
+
+    this._chatBubble?.destroy();
+
+    const bubble = this.scene.add.container(0, -Avatar.SPRITE_H - 22);
+    const label = this.scene.add.text(0, 0, text, {
+      fontSize: '11px',
+      color: '#1a1206',
+      fontFamily: 'monospace',
+      wordWrap: { width: 170, useAdvancedWrap: true },
+      align: 'center',
+      lineSpacing: 2,
+      resolution: 2,
+    }).setOrigin(0.5, 1);
+
+    const width = Phaser.Math.Clamp(label.width + 18, 42, 188);
+    const height = label.height + 12;
+    const bg = this.scene.add.graphics();
+    bg.fillStyle(0xfff4d0, 0.96);
+    bg.fillRoundedRect(-width / 2, -height, width, height, 7);
+    bg.fillTriangle(-7, -1, 7, -1, 0, 8);
+    bg.lineStyle(1, 0x5d3b20, 0.28);
+    bg.strokeRoundedRect(-width / 2, -height, width, height, 7);
+
+    bubble.add([bg, label]);
+    bubble.setAlpha(0);
+    this.add(bubble);
+    this._chatBubble = bubble;
+
+    this.scene.tweens.add({
+      targets: bubble,
+      alpha: 1,
+      y: -Avatar.SPRITE_H - 31,
+      duration: 140,
+      ease: 'Quad.easeOut',
+      onComplete: () => {
+        this.scene.tweens.add({
+          targets: bubble,
+          alpha: 0,
+          y: -Avatar.SPRITE_H - 44,
+          delay: 3300,
+          duration: 420,
+          ease: 'Quad.easeIn',
+          onComplete: () => {
+            if (this._chatBubble === bubble) this._chatBubble = null;
+            bubble.destroy();
+          },
+        });
+      },
+    });
   }
 
   // ── Held item ───────────────────────────────────────────────────────────────
@@ -341,6 +396,7 @@ export class Avatar extends Phaser.GameObjects.Container {
 
   destroy(fromScene?: boolean): void {
     this._stopWalkBob();
+    this._chatBubble?.destroy();
     super.destroy(fromScene);
   }
 }

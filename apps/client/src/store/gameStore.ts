@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { AvatarState, HeldItem, JukeboxTrackId } from '@social-square/shared';
+import { CHAT_HISTORY_LIMIT } from '@social-square/shared';
+import type { AvatarState, ChatMessage, HeldItem, JukeboxTrackId } from '@social-square/shared';
 
 export type WorldLoadingState = 'initial' | 'streaming' | null;
 
@@ -37,6 +38,9 @@ interface GameState {
   setLocalAvatarState: (state: AvatarState) => void;
   jukeboxStatus: JukeboxStatus | null;
   setJukeboxStatus: (status: JukeboxStatus | null) => void;
+  chatMessages: ChatMessage[];
+  addChatMessage: (message: ChatMessage) => void;
+  clearChatMessages: () => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -66,4 +70,9 @@ export const useGameStore = create<GameState>((set) => ({
   setLocalAvatarState: (state) => set({ localAvatarState: state }),
   jukeboxStatus: null,
   setJukeboxStatus: (status) => set({ jukeboxStatus: status }),
+  chatMessages: [],
+  addChatMessage: (message) => set((state) => ({
+    chatMessages: [...state.chatMessages, message].slice(-CHAT_HISTORY_LIMIT),
+  })),
+  clearChatMessages: () => set({ chatMessages: [] }),
 }));

@@ -1,9 +1,11 @@
 import type { Server, Socket } from 'socket.io';
+import { randomUUID } from 'node:crypto';
 import {
   Direction,
   ROOM_CONFIGS,
   isJukeboxTrackId,
   nextJukeboxTrackId,
+  normalizeChatText,
   normalizeJukeboxState,
 } from '@social-square/shared';
 import type {
@@ -247,6 +249,23 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     const roomId = socket.data.currentRoom;
     if (!roomId || !isEmoteId(emoteId)) return;
     socket.to(roomId).emit('user-emote', { userId, emoteId });
+  });
+
+  socket.on('chat-message', ({ text }) => {
+    const roomId = socket.data.currentRoom;
+    if (!roomId) return;
+
+    const normalized = normalizeChatText(text);
+    if (!normalized) return;
+
+    io.to(roomId).emit('user-chat-message', {
+      id: randomUUID(),
+      roomId,
+      userId,
+      username,
+      text: normalized,
+      sentAt: Date.now(),
+    });
   });
 
   socket.on('hold-item', async ({ item }) => {

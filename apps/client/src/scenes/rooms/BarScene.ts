@@ -13,6 +13,7 @@ import {
 import type {
   AvatarConfig,
   AvatarState,
+  ChatMessage,
   EmoteId,
   HeldItem,
   JukeboxState,
@@ -152,6 +153,8 @@ export class BarScene extends BaseRoomScene {
     eventBus.on('leave-seat', () => this._leaveSeat(true), this);
     eventBus.on('jukebox-toggle', () => this._requestJukeboxToggle(), this);
     eventBus.on('jukebox-next', () => this._requestJukeboxNext(), this);
+    eventBus.on('chat-send', (text: string) => this._sendChatMessage(text), this);
+    useGameStore.getState().clearChatMessages();
 
     this._createStations();
 
@@ -295,6 +298,19 @@ export class BarScene extends BaseRoomScene {
   private _triggerEmote(emoteId: EmoteId): void {
     this.localAvatar?.playEmote(emoteId);
     this._network?.emitEmote(emoteId);
+  }
+
+  private _sendChatMessage(text: string): void {
+    this._network?.emitChatMessage(text);
+  }
+
+  private _applyChatMessage(message: ChatMessage): void {
+    useGameStore.getState().addChatMessage(message);
+    if (message.userId === this._myUserId) {
+      this.localAvatar?.showChatBubble(message.text);
+      return;
+    }
+    this._remoteAvatars.get(message.userId)?.showChatBubble(message.text);
   }
 
   private _requestJukeboxToggle(): void {
@@ -475,6 +491,10 @@ export class BarScene extends BaseRoomScene {
         this._remoteAvatars.get(userId)?.playEmote(emoteId);
       },
 
+      onUserChatMessage: (message) => {
+        this._applyChatMessage(message);
+      },
+
       onError: ({ code, message }) => {
         console.error(`[Network] ${code}: ${message}`);
       },
@@ -544,6 +564,7 @@ export class BarScene extends BaseRoomScene {
     eventBus.off('leave-seat');
     eventBus.off('jukebox-toggle');
     eventBus.off('jukebox-next');
+    eventBus.off('chat-send');
     this.input.keyboard?.off('keydown-B');
     this.input.keyboard?.off('keydown-ONE');
     this.input.keyboard?.off('keydown-TWO');
@@ -573,5 +594,6 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().setHeldItem(null);
     useGameStore.getState().setJukeboxStatus(null);
     useGameStore.getState().setLocalAvatarState('idle');
+    useGameStore.getState().clearChatMessages();
   }
 }

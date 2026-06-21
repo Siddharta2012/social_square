@@ -4,6 +4,7 @@ import type {
   ServerToClientEvents,
   AvatarConfig,
   AvatarState,
+  ChatMessage,
   Direction,
   EmoteId,
   HeldItem,
@@ -32,6 +33,7 @@ export interface NetworkCallbacks {
   onUserHeldItem?: (data: { userId: string; item: HeldItem }) => void;
   onObjectStateChanged?: (data: { objectId: string; state: ObjectState }) => void;
   onUserEmote?: (data: { userId: string; emoteId: EmoteId }) => void;
+  onUserChatMessage?: (data: ChatMessage) => void;
   onError?: (data: { code: string; message: string }) => void;
 }
 
@@ -69,6 +71,7 @@ export class NetworkSystem {
     this._socket.on('user-held-item', (data) => this._callbacks.onUserHeldItem?.(data));
     this._socket.on('object-state-changed', (data) => this._callbacks.onObjectStateChanged?.(data));
     this._socket.on('user-emote', (data) => this._callbacks.onUserEmote?.(data));
+    this._socket.on('user-chat-message', (data) => this._callbacks.onUserChatMessage?.(data));
     this._socket.on('error', (data) => this._callbacks.onError?.(data));
   }
 
@@ -102,6 +105,10 @@ export class NetworkSystem {
 
   emitEmote(emoteId: EmoteId): void {
     this._socket?.emit('emote', { emoteId });
+  }
+
+  emitChatMessage(text: string): void {
+    this._socket?.emit('chat-message', { text });
   }
 
   /** Throttled to MOVE_EMIT_INTERVAL ms. */

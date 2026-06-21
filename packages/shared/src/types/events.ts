@@ -1,4 +1,5 @@
 // Socket.IO event types shared between client and server
+import type { ChatMessage } from '../constants/chat';
 
 export interface AvatarConfig {
   userId: string;
@@ -58,6 +59,7 @@ export interface ClientToServerEvents {
   'interact': (data: { objectId: string; action: string; payload?: ObjectState }) => void;
   'emote': (data: { emoteId: EmoteId }) => void;
   'hold-item': (data: { item: HeldItem }) => void;
+  'chat-message': (data: { text: string }) => void;
 }
 
 // Server → Client events
@@ -69,6 +71,7 @@ export interface ServerToClientEvents {
   'object-state-changed': (data: { objectId: string; state: ObjectState }) => void;
   'user-emote': (data: { userId: string; emoteId: EmoteId }) => void;
   'user-held-item': (data: { userId: string; item: HeldItem }) => void;
+  'user-chat-message': (data: ChatMessage) => void;
   'room-users-count': (data: { roomId: string; count: number }) => void;
   'error': (data: { code: string; message: string }) => void;
 }

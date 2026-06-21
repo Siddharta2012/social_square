@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { CHAT_MAX_LENGTH, normalizeChatText } from '@social-square/shared';
 import type { EmoteId } from '@social-square/shared';
 import { useGameStore } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';
@@ -23,8 +24,10 @@ export const HUD: React.FC = () => {
   const worldLoading = useGameStore((s) => s.worldLoading);
   const localAvatarState = useGameStore((s) => s.localAvatarState);
   const jukeboxStatus = useGameStore((s) => s.jukeboxStatus);
+  const chatMessages = useGameStore((s) => s.chatMessages);
   const username = useUserStore((s) => s.username);
   const setUser = useUserStore((s) => s.setUser);
+  const [chatDraft, setChatDraft] = useState('');
 
   const inRoom = currentRoomId !== null;
 
@@ -47,6 +50,13 @@ export const HUD: React.FC = () => {
 
   const emitEmote = (emoteId: EmoteId) => {
     eventBus.emit('emote', emoteId);
+  };
+
+  const sendChat = () => {
+    const text = normalizeChatText(chatDraft);
+    if (!text) return;
+    eventBus.emit('chat-send', text);
+    setChatDraft('');
   };
 
   const smallButtonStyle: React.CSSProperties = {
@@ -230,6 +240,90 @@ export const HUD: React.FC = () => {
             fontWeight: 'bold',
           }}>B</kbd>
           per {heldItem === 'beer' ? 'bere' : 'mangiare'}
+        </div>
+      )}
+
+      {/* Chat */}
+      {inRoom && (
+        <div style={{
+          position: 'absolute',
+          left: '16px',
+          bottom: heldItem ? '96px' : '52px',
+          width: 'min(360px, calc(100vw - 32px))',
+          pointerEvents: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+        }}>
+          {chatMessages.length > 0 && (
+            <div style={{
+              maxHeight: '118px',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'flex-end',
+              gap: '4px',
+              pointerEvents: 'none',
+            }}>
+              {chatMessages.slice(-4).map((message) => (
+                <div key={message.id} style={{
+                  background: 'rgba(10,10,30,0.78)',
+                  border: '1px solid rgba(150,150,255,0.16)',
+                  borderRadius: '5px',
+                  padding: '4px 7px',
+                  color: '#e0e0ff',
+                  fontSize: '11px',
+                  lineHeight: 1.35,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+                }}>
+                  <span style={{ color: '#88ffbb', fontWeight: 'bold' }}>{message.username}</span>
+                  <span style={{ color: '#7777aa' }}>:</span>{' '}
+                  <span>{message.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              sendChat();
+            }}
+            style={{ display: 'flex', gap: '6px' }}
+          >
+            <input
+              value={chatDraft}
+              maxLength={CHAT_MAX_LENGTH}
+              onChange={(event) => setChatDraft(event.target.value)}
+              placeholder="Scrivi..."
+              style={{
+                flex: 1,
+                minWidth: 0,
+                height: '30px',
+                boxSizing: 'border-box',
+                background: 'rgba(10,10,30,0.88)',
+                border: '1px solid rgba(150,150,255,0.32)',
+                borderRadius: '4px',
+                color: '#e0e0ff',
+                fontFamily: 'monospace',
+                fontSize: '12px',
+                padding: '0 9px',
+                outline: 'none',
+              }}
+            />
+            <button
+              type="submit"
+              disabled={!normalizeChatText(chatDraft)}
+              style={{
+                ...smallButtonStyle,
+                height: '30px',
+                opacity: normalizeChatText(chatDraft) ? 1 : 0.48,
+                cursor: normalizeChatText(chatDraft) ? 'pointer' : 'default',
+              }}
+            >
+              Invia
+            </button>
+          </form>
         </div>
       )}
 
