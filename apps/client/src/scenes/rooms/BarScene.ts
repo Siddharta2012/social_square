@@ -21,6 +21,7 @@ import type {
   JukeboxState,
   ObjectState,
   OrderItemId,
+  Position,
   WaiterState,
 } from '@social-square/shared';
 import { JukeboxPlayer } from '../../audio/JukeboxPlayer';
@@ -31,7 +32,18 @@ import { NetworkSystem } from '../../systems/NetworkSystem';
 import { VoiceSystem } from '../../systems/VoiceSystem';
 import { RemoteAvatar } from '../../entities/RemoteAvatar';
 import { InteractStation } from '../../entities/InteractStation';
-import { JUKEBOX_OBJECT_ID, SEAT_DEFINITIONS, isSeatObjectId, type SeatDefinition } from '../../world/interactions';
+import {
+  INTERACTION_RADIUS_TILES,
+  JUKEBOX_OBJECT_ID,
+  JUKEBOX_POSITION,
+  PETAL_ACTION_COST,
+  PETAL_BLOOM_VALUE,
+  SEAT_DEFINITIONS,
+  isSeatObjectId,
+  isWithinInteractionRange,
+  type SeatDefinition,
+} from '../../world/interactions';
+import { locationForPosition } from '../../world/locations';
 import { BaseRoomScene, type WorldConfig } from './BaseRoomScene';
 
 // ─── Station icon drawing ──────────────────────────────────────────────────────
@@ -81,10 +93,59 @@ function drawPretzelStand(g: Phaser.GameObjects.Graphics): void {
 }
 
 // ─── Scene ───────────────────────────────────────────────────────────────────
+function drawPetalBloom(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(0x000000, 0.18);
+  g.fillEllipse(0, 3, 28, 10);
+  g.lineStyle(2, 0x2e7d36, 1);
+  g.lineBetween(0, 0, 0, -22);
+  g.lineBetween(0, -9, -9, -15);
+  g.lineBetween(0, -10, 9, -16);
+
+  const colors = [0xffd166, 0xe85d75, 0x9b7cff, 0xffffff];
+  for (let i = 0; i < 8; i++) {
+    const angle = (Math.PI * 2 * i) / 8;
+    const x = Math.cos(angle) * 9;
+    const y = -24 + Math.sin(angle) * 5;
+    g.fillStyle(colors[i % colors.length], 1);
+    g.fillEllipse(x, y, 6, 4);
+  }
+  g.fillStyle(0xfff4d0, 1);
+  g.fillCircle(0, -24, 3);
+
+  for (const [x, y, color] of [
+    [-13, -2, 0xffd166],
+    [-5, 5, 0xe85d75],
+    [8, 1, 0x9b7cff],
+    [15, 5, 0xffffff],
+  ] as Array<[number, number, number]>) {
+    g.fillStyle(color, 0.95);
+    g.fillEllipse(x, y, 5, 3);
+  }
+}
+
 function drawHotspot(_g: Phaser.GameObjects.Graphics): void {
   _g.fillStyle(0xffffff, 0.001);
   _g.fillRect(-32, -56, 64, 56);
 }
+
+interface PetalBloom {
+  station: InteractStation;
+  position: Position;
+}
+
+const PETAL_MAX_ACTIVE = 5;
+const PETAL_SPAWN_INTERVAL_MS = 9000;
+const PETAL_COLLECT_RADIUS_TILES = 2.75;
+const PETAL_SPAWN_POINTS: Position[] = [
+  { x: 3, y: 35 },
+  { x: 12, y: 30 },
+  { x: 20, y: 42 },
+  { x: 11, y: 43 },
+  { x: 28, y: 33 },
+  { x: 35, y: 42 },
+  { x: 41, y: 30 },
+  { x: 44, y: 14 },
+];
 
 export class BarScene extends BaseRoomScene {
   private _network!: NetworkSystem;
@@ -92,6 +153,8 @@ export class BarScene extends BaseRoomScene {
   private _remoteAvatars = new Map<string, RemoteAvatar>();
   private _myUserId: string | null = null;
   private _stations: InteractStation[] = [];
+  private _petalBlooms: PetalBloom[] = [];
+  private _petalSpawnTimer: Phaser.Time.TimerEvent | null = null;
   private _sipsLeft = 0;
   private _jukebox = new JukeboxPlayer();
   private _jukeboxState: JukeboxState = normalizeJukeboxState(null);
@@ -102,6 +165,7 @@ export class BarScene extends BaseRoomScene {
   private _waiterAvatar: RemoteAvatar | null = null;
   private _waiterState: WaiterState = normalizeWaiterState(null);
   private _deliveredOrderIds = new Set<string>();
+  private _lastLocalContextKey = '';
 
   private static readonly BEER_SIPS = 3;
   private static readonly PRETZEL_BITES = 2;
@@ -134,7 +198,7 @@ export class BarScene extends BaseRoomScene {
       return true;
     }
 
-    if (tileX === 16 && tileY === 3) {
+    if (tileX === JUKEBOX_POSITION.x && tileY === JUKEBOX_POSITION.y) {
       this._requestJukeboxNext();
       return true;
     }
@@ -166,6 +230,7 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().clearChatMessages();
 
     this._createStations();
+    this._startPetalSpawns();
 
     // Drink / eat held item
     this.input.keyboard?.on('keydown-B', () => this._consume());
@@ -182,6 +247,7 @@ export class BarScene extends BaseRoomScene {
     this._remoteAvatars.forEach((avatar) => avatar.tick());
     this._waiterAvatar?.tick();
     this._updatePendingSeat();
+    this._syncLocalContext();
   }
 
   // ── Interactive stations ────────────────────────────────────────────────────
@@ -189,22 +255,22 @@ export class BarScene extends BaseRoomScene {
   private _createStations(): void {
     this._stations.push(new InteractStation({
       scene: this, worldX: 2, worldY: 0,
-      label: '🍺 Spillatore — click per una birra',
+      label: `Spillatore - ${PETAL_ACTION_COST} petali`,
       draw: drawBeerTap,
       hitWidth: 26, hitHeight: 42,
-      onInteract: () => this._pickUp('beer'),
+      onInteract: () => this._pickUpFromStation('beer', { x: 2, y: 0 }),
     }));
 
     this._stations.push(new InteractStation({
       scene: this, worldX: 6, worldY: 0,
-      label: '🥨 Pretzel — click per uno snack',
+      label: `Pretzel - ${PETAL_ACTION_COST} petali`,
       draw: drawPretzelStand,
       hitWidth: 30, hitHeight: 30,
-      onInteract: () => this._pickUp('pretzel'),
+      onInteract: () => this._pickUpFromStation('pretzel', { x: 6, y: 0 }),
     }));
 
     this._stations.push(new InteractStation({
-      scene: this, worldX: 16, worldY: 3,
+      scene: this, worldX: JUKEBOX_POSITION.x, worldY: JUKEBOX_POSITION.y,
       label: 'Jukebox - click per cambiare brano',
       draw: drawHotspot,
       hitWidth: 54, hitHeight: 62,
@@ -223,12 +289,28 @@ export class BarScene extends BaseRoomScene {
     }
   }
 
-  private _pickUp(item: HeldItem): void {
+  private _pickUpFromStation(item: HeldItem, position: Position): void {
+    if (!this._isNear(position)) {
+      this._showNotice('Avvicinati al bancone');
+      return;
+    }
+
+    this._pickUp(item, true);
+  }
+
+  private _pickUp(item: HeldItem, chargePetals = false): void {
     if (!item) return;
+    if (chargePetals && !this._trySpendPetals()) return;
+
     this._sipsLeft = item === 'beer' ? BarScene.BEER_SIPS : BarScene.PRETZEL_BITES;
     this.localAvatar.setHeldItem(item, 1);
     useGameStore.getState().setHeldItem(item);
     this._network.emitHoldItem(item);
+
+    if (chargePetals) {
+      const label = item === 'beer' ? 'Birra' : 'Pretzel';
+      this._showNotice(`${label}: -${PETAL_ACTION_COST} petali`);
+    }
   }
 
   private _consume(): void {
@@ -248,6 +330,110 @@ export class BarScene extends BaseRoomScene {
   }
 
   // ── Network setup ─────────────────────────────────────────────────────────
+
+  private _localPosition(): Position | null {
+    if (!this.localAvatar) return null;
+    return { x: this.movementSystem.posX, y: this.movementSystem.posY };
+  }
+
+  private _waiterPosition(): Position {
+    return { x: this._waiterState.x, y: this._waiterState.y };
+  }
+
+  private _isNear(position: Position, radius = INTERACTION_RADIUS_TILES): boolean {
+    const local = this._localPosition();
+    return local ? isWithinInteractionRange(local, position, radius) : false;
+  }
+
+  private _syncLocalContext(): void {
+    const local = this._localPosition();
+    if (!local) return;
+
+    const location = locationForPosition(local).name;
+    const nearJukebox = this._isNear(JUKEBOX_POSITION);
+    const nearWaiter = this._isNear(this._waiterPosition());
+    const store = useGameStore.getState();
+    const canAffordAction = store.petals >= PETAL_ACTION_COST;
+    const key = `${location}|${nearJukebox ? 1 : 0}|${nearWaiter ? 1 : 0}|${canAffordAction ? 1 : 0}`;
+    if (key === this._lastLocalContextKey) return;
+
+    this._lastLocalContextKey = key;
+    store.setLocationName(location);
+    store.setActionAvailability({ nearJukebox, nearWaiter, canAffordAction });
+  }
+
+  private _trySpendPetals(): boolean {
+    const store = useGameStore.getState();
+    if (store.petals < PETAL_ACTION_COST) {
+      this._showNotice(`Servono ${PETAL_ACTION_COST} petali`);
+      return false;
+    }
+
+    if (!store.spendPetals(PETAL_ACTION_COST)) {
+      this._showNotice(`Servono ${PETAL_ACTION_COST} petali`);
+      return false;
+    }
+
+    this._syncLocalContext();
+    return true;
+  }
+
+  private _startPetalSpawns(): void {
+    this.time.delayedCall(1200, () => {
+      for (let i = 0; i < 4; i++) this._spawnPetalBloom();
+    });
+
+    this._petalSpawnTimer = this.time.addEvent({
+      delay: PETAL_SPAWN_INTERVAL_MS,
+      loop: true,
+      callback: () => this._spawnPetalBloom(),
+    });
+  }
+
+  private _spawnPetalBloom(): void {
+    if (this._petalBlooms.length >= PETAL_MAX_ACTIVE) return;
+
+    const available = PETAL_SPAWN_POINTS.filter((point) => {
+      const occupied = this._petalBlooms.some((bloom) => (
+        Math.round(bloom.position.x) === Math.round(point.x) &&
+        Math.round(bloom.position.y) === Math.round(point.y)
+      ));
+      if (occupied) return false;
+      const tile = this.worldMap.getTile(Math.round(point.x), Math.round(point.y));
+      return tile?.walkable !== false;
+    });
+    if (available.length === 0) return;
+
+    const index = Phaser.Math.Between(0, available.length - 1);
+    const position = { ...available[index] };
+    let bloom: PetalBloom;
+    const station = new InteractStation({
+      scene: this,
+      worldX: position.x,
+      worldY: position.y,
+      label: `Petali +${PETAL_BLOOM_VALUE}`,
+      draw: drawPetalBloom,
+      hitWidth: 38,
+      hitHeight: 42,
+      onInteract: () => this._collectPetalBloom(bloom),
+    });
+
+    bloom = { station, position };
+    this._petalBlooms.push(bloom);
+  }
+
+  private _collectPetalBloom(bloom: PetalBloom): void {
+    if (!this._isNear(bloom.position, PETAL_COLLECT_RADIUS_TILES)) {
+      this._showNotice('Avvicinati ai petali');
+      return;
+    }
+
+    this._petalBlooms = this._petalBlooms.filter((candidate) => candidate !== bloom);
+    bloom.station.destroy();
+    useGameStore.getState().addPetals(PETAL_BLOOM_VALUE);
+    this._showNotice(`+${PETAL_BLOOM_VALUE} petali`);
+    this._syncLocalContext();
+  }
 
   private _beginSeatInteraction(seat: SeatDefinition): void {
     const occupant = this._seatOccupants.get(seat.id);
@@ -325,6 +511,11 @@ export class BarScene extends BaseRoomScene {
 
   private _callWaiter(): void {
     if (!this.localAvatar) return;
+    if (!this._isNear(this._waiterPosition())) {
+      this._showNotice('Avvicinati al cameriere');
+      return;
+    }
+
     this._network?.emitInteract(WAITER_OBJECT_ID, 'waiter-call', {
       x: Math.round(this.movementSystem.posX),
       y: Math.round(this.movementSystem.posY),
@@ -332,6 +523,12 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _placeWaiterOrder(item: OrderItemId): void {
+    if (!this._isNear(this._waiterPosition())) {
+      this._showNotice('Avvicinati al cameriere');
+      return;
+    }
+    if (!this._trySpendPetals()) return;
+
     this._network?.emitInteract(WAITER_OBJECT_ID, 'waiter-order', {
       item,
       x: Math.round(this.movementSystem.posX),
@@ -376,12 +573,17 @@ export class BarScene extends BaseRoomScene {
       !this._deliveredOrderIds.has(waiter.orderId)
     ) {
       this._deliveredOrderIds.add(waiter.orderId);
-      this._pickUp(waiter.item);
+      this._pickUp(waiter.item, false);
       this._showNotice(`${waiter.item === 'beer' ? 'Birra' : 'Pretzel'} consegnato`);
     }
   }
 
   private _requestJukeboxToggle(): void {
+    if (!this._isNear(JUKEBOX_POSITION)) {
+      this._showNotice('Avvicinati al jukebox');
+      return;
+    }
+
     const now = Date.now();
     const next: JukeboxState = {
       ...this._jukeboxState,
@@ -395,6 +597,11 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _requestJukeboxNext(): void {
+    if (!this._isNear(JUKEBOX_POSITION)) {
+      this._showNotice('Avvicinati al jukebox');
+      return;
+    }
+
     const now = Date.now();
     const next: JukeboxState = {
       ...this._jukeboxState,
@@ -569,6 +776,7 @@ export class BarScene extends BaseRoomScene {
 
       onError: ({ code, message }) => {
         console.error(`[Network] ${code}: ${message}`);
+        if (message) this._showNotice(message);
       },
     });
 
@@ -652,6 +860,10 @@ export class BarScene extends BaseRoomScene {
     this._remoteAvatars.clear();
     this._waiterAvatar?.destroy();
     this._waiterAvatar = null;
+    this._petalSpawnTimer?.remove(false);
+    this._petalSpawnTimer = null;
+    this._petalBlooms.forEach((bloom) => bloom.station.destroy());
+    this._petalBlooms = [];
     this._stations.forEach((s) => s.destroy());
     this._stations = [];
     this._seatOccupants.clear();
@@ -665,6 +877,7 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().setConnected(false);
     useGameStore.getState().setCurrentRoom(null);
     useGameStore.getState().setRoomName(null);
+    useGameStore.getState().setLocationName(null);
     useGameStore.getState().setUsersInRoom(0);
     useGameStore.getState().setVoiceAvailable(false);
     useGameStore.getState().setVoiceMuted(false);
@@ -673,5 +886,11 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().setLocalAvatarState('idle');
     useGameStore.getState().clearChatMessages();
     useGameStore.getState().setWaiterStatus(null);
+    useGameStore.getState().setActionAvailability({
+      nearJukebox: false,
+      nearWaiter: false,
+      canAffordAction: useGameStore.getState().petals >= PETAL_ACTION_COST,
+    });
+    this._lastLocalContextKey = '';
   }
 }

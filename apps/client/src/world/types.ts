@@ -18,6 +18,7 @@ export type DecorationKind =
   | 'barWall'
   | 'barCounter'
   | 'bottleShelf'
+  | 'barSign'
   | 'stool'
   | 'table'
   | 'jukebox'

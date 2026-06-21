@@ -200,6 +200,11 @@ export class SectorRenderer {
         lights.push(this._registerLight(light, 0.45));
         container.setDepth(IsometricSystem.depth(gx, gy) - 0.25);
         break;
+      case 'barSign':
+        this._drawBarSign(container, gfx, light, decoration);
+        lights.push(this._registerLight(light, 0.62));
+        container.setDepth(IsometricSystem.depth(gx, gy) + 0.22);
+        break;
       case 'stool':
         this._drawStool(gfx, decoration);
         container.setDepth(IsometricSystem.depth(gx, gy) + 0.08);
@@ -343,6 +348,49 @@ export class SectorRenderer {
     }
     light.fillStyle(0xffd67a, 1);
     light.fillCircle(0, -31, 30);
+  }
+
+  private _drawBarSign(
+    container: Phaser.GameObjects.Container,
+    gfx: Phaser.GameObjects.Graphics,
+    light: Phaser.GameObjects.Graphics,
+    decoration: DecorationData,
+  ): void {
+    this._softShadow(gfx, 48, 14, 5);
+    gfx.lineStyle(5, 0x3d2417, 1);
+    gfx.lineBetween(-18, -2, -18, -74);
+    gfx.lineBetween(18, -2, 18, -74);
+    gfx.lineStyle(2, 0x8a5a35, 1);
+    gfx.lineBetween(-18, -8, -18, -70);
+    gfx.lineBetween(18, -8, 18, -70);
+
+    const outer = decoration.color ?? 0x8f2333;
+    const inner = decoration.accentColor ?? 0xffd166;
+    gfx.fillStyle(0x2b1518, 1);
+    gfx.fillRoundedRect(-42, -94, 84, 50, 7);
+    gfx.fillStyle(outer, 1);
+    gfx.fillRoundedRect(-38, -90, 76, 42, 6);
+    gfx.fillStyle(inner, 1);
+    gfx.fillRoundedRect(-32, -84, 64, 30, 4);
+    gfx.fillStyle(0x2b1518, 1);
+    gfx.fillRoundedRect(-28, -80, 56, 22, 3);
+    gfx.lineStyle(2, 0xfff4d0, 0.55);
+    gfx.strokeRoundedRect(-38, -90, 76, 42, 6);
+
+    light.fillStyle(0xffd166, 1);
+    light.fillCircle(0, -70, 44);
+
+    const label = this.scene.add.text(0, -69, 'BAR BORA\nH24', {
+      fontSize: '12px',
+      color: '#fff4d0',
+      fontFamily: 'monospace',
+      fontStyle: 'bold',
+      align: 'center',
+      stroke: '#401016',
+      strokeThickness: 3,
+      lineSpacing: -2,
+    }).setOrigin(0.5);
+    container.add(label);
   }
 
   private _drawStool(gfx: Phaser.GameObjects.Graphics, decoration: DecorationData): void {

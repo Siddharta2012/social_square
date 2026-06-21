@@ -7,10 +7,11 @@ const HEDGE = 0x274d24;
 
 const SOLID_DECORATIONS: Array<[number, number]> = [
   [3, 7], [17, 6], [20, 15], [5, 18],
-  [15, 12], [6, 13], [18, 19],
+  [15, 12], [6, 13], [18, 19], [12, 2],
 ];
 
 const DECORATIONS: DecorationData[] = [
+  { kind: 'barSign', x: 12, y: 2, variant: 0, color: 0x9b2438, accentColor: 0xffd166 },
   { kind: 'tree', x: 3, y: 7, variant: 0 },
   { kind: 'tree', x: 17, y: 6, variant: 1, color: 0x2f7446, accentColor: 0x5ea85b },
   { kind: 'tree', x: 20, y: 15, variant: 2, color: 0x28633a, accentColor: 0x66a95c },

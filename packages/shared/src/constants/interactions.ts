@@ -2,6 +2,9 @@ import type { Position } from '../types/events';
 
 export const JUKEBOX_OBJECT_ID = 'jukebox';
 export const JUKEBOX_POSITION: Position = { x: 16, y: 3 };
+export const INTERACTION_RADIUS_TILES = 3.25;
+export const PETAL_ACTION_COST = 100;
+export const PETAL_BLOOM_VALUE = 25;
 
 export interface SeatDefinition {
   id: string;
@@ -27,4 +30,18 @@ export const SEAT_DEFINITIONS: SeatDefinition[] = [
 
 export function isSeatObjectId(objectId: string): boolean {
   return objectId.startsWith('seat:');
+}
+
+export function isWithinInteractionRange(
+  a: Position,
+  b: Position,
+  radius = INTERACTION_RADIUS_TILES,
+): boolean {
+  if (!Number.isFinite(a.x) || !Number.isFinite(a.y) || !Number.isFinite(b.x) || !Number.isFinite(b.y)) {
+    return false;
+  }
+
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy) <= radius;
 }

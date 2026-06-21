@@ -34,10 +34,12 @@ describe('phase 1 visual content', () => {
       'umbrella',
       'gardenTable',
       'stringLight',
+      'barSign',
       'flowerPatch',
       'grassTuft',
     ]));
     expect(gardenSector.tiles[0][9].detail).toBe('path');
+    expect(gardenSector.tiles[2][12].walkable).toBe(false);
     expect(gardenSector.tiles[4][1].detail).toBe('grass');
     expect(gardenSector.tiles[23][0].detail).toBe('hedge');
   });

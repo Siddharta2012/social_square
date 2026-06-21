@@ -2,7 +2,9 @@ import type { Server, Socket } from 'socket.io';
 import { randomUUID } from 'node:crypto';
 import {
   Direction,
+  INTERACTION_RADIUS_TILES,
   JUKEBOX_OBJECT_ID,
+  JUKEBOX_POSITION,
   ROOM_CONFIGS,
   WAITER_OBJECT_ID,
   filterObjectsByInterest,
@@ -12,6 +14,7 @@ import {
   isObjectVisibleToViewer,
   isPositionInInterestRange,
   isSeatObjectId,
+  isWithinInteractionRange,
   nextJukeboxTrackId,
   normalizeChatText,
   normalizeJukeboxState,
@@ -81,6 +84,30 @@ function changedSector(a: Position, b: Position): boolean {
   const sectorA = positionToSector(a);
   const sectorB = positionToSector(b);
   return sectorA.sx !== sectorB.sx || sectorA.sy !== sectorB.sy;
+}
+
+async function currentRoomUser(roomId: string, userId: string): Promise<RoomUser | null> {
+  const roomState = await state.getRoomState(roomId);
+  return roomState.users.find((user) => user.userId === userId) ?? null;
+}
+
+function emitTooFar(socket: IoSocket, message: string): void {
+  socket.emit('error', { code: 'TOO_FAR', message });
+}
+
+async function ensureUserNear(
+  socket: IoSocket,
+  roomId: string,
+  userId: string,
+  target: Position,
+  message: string,
+): Promise<RoomUser | null> {
+  const user = await currentRoomUser(roomId, userId);
+  if (!user || !isWithinInteractionRange(user.position, target, INTERACTION_RADIUS_TILES)) {
+    emitTooFar(socket, message);
+    return null;
+  }
+  return user;
 }
 
 function userJoinedPayload(user: RoomUser): Parameters<ServerToClientEvents['user-joined']>[0] {
@@ -519,13 +546,19 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
           return;
         }
 
-        const target = seatPositionFrom(payload);
-        if (!target) {
-          socket.emit('error', { code: 'INVALID_WAITER_TARGET', message: 'Posizione ordine non valida' });
-          return;
-        }
+        const caller = await ensureUserNear(
+          socket,
+          roomId,
+          userId,
+          { x: current.x, y: current.y },
+          'Avvicinati al cameriere',
+        );
+        if (!caller) return;
 
-        await startWaiterCall(io, roomId, userId, username, target);
+        await startWaiterCall(io, roomId, userId, username, {
+          x: Math.round(caller.position.x),
+          y: Math.round(caller.position.y),
+        });
         return;
       }
 
@@ -541,12 +574,20 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
           return;
         }
 
-        const position = seatPositionFrom(payload);
-        startWaiterOrder(io, roomId, position ? {
+        const customer = await ensureUserNear(
+          socket,
+          roomId,
+          userId,
+          { x: current.x, y: current.y },
+          'Avvicinati al cameriere',
+        );
+        if (!customer) return;
+
+        startWaiterOrder(io, roomId, {
           ...current,
-          targetX: position.x,
-          targetY: position.y,
-        } : current, item);
+          targetX: Math.round(customer.position.x),
+          targetY: Math.round(customer.position.y),
+        }, item);
         return;
       }
 
@@ -555,6 +596,15 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     }
 
     if (objectId === JUKEBOX_OBJECT_ID) {
+      const listener = await ensureUserNear(
+        socket,
+        roomId,
+        userId,
+        JUKEBOX_POSITION,
+        'Avvicinati al jukebox',
+      );
+      if (!listener) return;
+
       const now = Date.now();
       const current = normalizeJukeboxState(await state.getObjectState(roomId, objectId), now);
       let next = current;

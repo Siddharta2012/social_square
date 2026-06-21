@@ -11,11 +11,19 @@ export interface JukeboxStatus {
   blocked: boolean;
 }
 
+export interface ActionAvailability {
+  nearJukebox: boolean;
+  nearWaiter: boolean;
+  canAffordAction: boolean;
+}
+
 interface GameState {
   isConnected: boolean;
   currentRoomId: string | null;
   roomName: string | null;
+  locationName: string | null;
   usersInRoom: number;
+  petals: number;
   showUsernameForm: boolean;
   showAuthForm: boolean;
   voiceAvailable: boolean;
@@ -23,7 +31,10 @@ interface GameState {
   setConnected: (connected: boolean) => void;
   setCurrentRoom: (roomId: string | null) => void;
   setRoomName: (name: string | null) => void;
+  setLocationName: (name: string | null) => void;
   setUsersInRoom: (count: number) => void;
+  addPetals: (amount: number) => void;
+  spendPetals: (amount: number) => boolean;
   setShowUsernameForm: (show: boolean) => void;
   setShowAuthForm: (show: boolean) => void;
   setVoiceAvailable: (v: boolean) => void;
@@ -43,13 +54,17 @@ interface GameState {
   clearChatMessages: () => void;
   waiterStatus: WaiterState | null;
   setWaiterStatus: (status: WaiterState | null) => void;
+  actionAvailability: ActionAvailability;
+  setActionAvailability: (availability: ActionAvailability) => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
   isConnected: false,
   currentRoomId: null,
   roomName: null,
+  locationName: null,
   usersInRoom: 0,
+  petals: 0,
   showUsernameForm: false,
   showAuthForm: false,
   voiceAvailable: false,
@@ -57,7 +72,21 @@ export const useGameStore = create<GameState>((set) => ({
   setConnected: (connected) => set({ isConnected: connected }),
   setCurrentRoom: (roomId) => set({ currentRoomId: roomId }),
   setRoomName: (name) => set({ roomName: name }),
+  setLocationName: (name) => set({ locationName: name }),
   setUsersInRoom: (count) => set({ usersInRoom: count }),
+  addPetals: (amount) => set((state) => ({
+    petals: Math.max(0, state.petals + Math.max(0, Math.floor(amount))),
+  })),
+  spendPetals: (amount) => {
+    const cost = Math.max(0, Math.floor(amount));
+    let spent = false;
+    set((state) => {
+      if (state.petals < cost) return {};
+      spent = true;
+      return { petals: state.petals - cost };
+    });
+    return spent;
+  },
   setShowUsernameForm: (show) => set({ showUsernameForm: show }),
   setShowAuthForm: (show) => set({ showAuthForm: show }),
   setVoiceAvailable: (v) => set({ voiceAvailable: v }),
@@ -79,4 +108,10 @@ export const useGameStore = create<GameState>((set) => ({
   clearChatMessages: () => set({ chatMessages: [] }),
   waiterStatus: null,
   setWaiterStatus: (status) => set({ waiterStatus: status }),
+  actionAvailability: {
+    nearJukebox: false,
+    nearWaiter: false,
+    canAffordAction: false,
+  },
+  setActionAvailability: (availability) => set({ actionAvailability: availability }),
 }));

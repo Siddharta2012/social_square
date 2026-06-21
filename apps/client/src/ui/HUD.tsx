@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CHAT_MAX_LENGTH, ORDER_ITEMS, normalizeChatText, orderItemLabel } from '@social-square/shared';
+import { CHAT_MAX_LENGTH, ORDER_ITEMS, PETAL_ACTION_COST, normalizeChatText, orderItemLabel } from '@social-square/shared';
 import type { EmoteId } from '@social-square/shared';
 import { useGameStore } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';
@@ -16,7 +16,9 @@ export const HUD: React.FC = () => {
   const isConnected = useGameStore((s) => s.isConnected);
   const currentRoomId = useGameStore((s) => s.currentRoomId);
   const roomName = useGameStore((s) => s.roomName);
+  const locationName = useGameStore((s) => s.locationName);
   const usersInRoom = useGameStore((s) => s.usersInRoom);
+  const petals = useGameStore((s) => s.petals);
   const voiceAvailable = useGameStore((s) => s.voiceAvailable);
   const voiceMuted = useGameStore((s) => s.voiceMuted);
   const setVoiceMuted = useGameStore((s) => s.setVoiceMuted);
@@ -26,6 +28,7 @@ export const HUD: React.FC = () => {
   const jukeboxStatus = useGameStore((s) => s.jukeboxStatus);
   const chatMessages = useGameStore((s) => s.chatMessages);
   const waiterStatus = useGameStore((s) => s.waiterStatus);
+  const actionAvailability = useGameStore((s) => s.actionAvailability);
   const userId = useUserStore((s) => s.userId);
   const username = useUserStore((s) => s.username);
   const setUser = useUserStore((s) => s.setUser);
@@ -64,6 +67,10 @@ export const HUD: React.FC = () => {
   const waiterIsMine = waiterStatus?.customerId === userId;
   const waiterCanCall = !waiterStatus || waiterStatus.phase === 'idle' || waiterStatus.phase === 'delivered';
   const waiterAwaitingOrder = waiterStatus?.phase === 'awaiting-order' && waiterIsMine;
+  const canUseJukebox = actionAvailability.nearJukebox;
+  const canUseWaiter = actionAvailability.nearWaiter;
+  const canAffordAction = petals >= PETAL_ACTION_COST;
+  const waiterButtonEnabled = canUseWaiter && (waiterCanCall || waiterIsMine);
   const waiterLabel = waiterCanCall
     ? 'Cameriere'
     : waiterStatus?.phase === 'approaching'
@@ -90,6 +97,11 @@ export const HUD: React.FC = () => {
     borderRadius: '3px',
   };
 
+  const disabledButtonStyle: React.CSSProperties = {
+    opacity: 0.44,
+    cursor: 'default',
+  };
+
   return (
     <div style={{
       position: 'absolute', top: 0, left: 0,
@@ -114,11 +126,39 @@ export const HUD: React.FC = () => {
           Social Square
         </span>
 
-        {inRoom && roomName && (
-          <span style={{ color: '#aaaadd', fontSize: '11px' }}>{roomName}</span>
+        {inRoom && (locationName || roomName) && (
+          <div style={{
+            position: 'absolute',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '1px',
+            pointerEvents: 'none',
+          }}>
+            <span style={{ color: '#fff4d0', fontSize: '13px', fontWeight: 700 }}>
+              {locationName ?? roomName}
+            </span>
+            <span style={{ color: '#7777aa', fontSize: '9px' }}>
+              location
+            </span>
+          </div>
         )}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {inRoom && (
+            <span style={{
+              color: '#ffe14d',
+              fontSize: '11px',
+              border: '1px solid rgba(255,225,77,0.28)',
+              background: 'rgba(255,225,77,0.08)',
+              padding: '3px 7px',
+              borderRadius: '3px',
+            }}>
+              Petali {petals}
+            </span>
+          )}
           {inRoom && (
             <span style={{ color: '#8888aa', fontSize: '11px' }}>
               {usersInRoom} {usersInRoom === 1 ? 'utente' : 'utenti'}
@@ -167,10 +207,20 @@ export const HUD: React.FC = () => {
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {jukeboxStatus?.playing ? jukeboxStatus.title : 'Jukebox'}
               </span>
-              <button style={smallButtonStyle} onClick={() => eventBus.emit('jukebox-toggle')}>
+              <button
+                style={{ ...smallButtonStyle, ...(!canUseJukebox ? disabledButtonStyle : {}) }}
+                disabled={!canUseJukebox}
+                title={canUseJukebox ? 'Play/Stop jukebox' : 'Avvicinati al jukebox'}
+                onClick={() => eventBus.emit('jukebox-toggle')}
+              >
                 {jukeboxStatus?.playing ? 'Stop' : 'Play'}
               </button>
-              <button style={smallButtonStyle} onClick={() => eventBus.emit('jukebox-next')}>
+              <button
+                style={{ ...smallButtonStyle, ...(!canUseJukebox ? disabledButtonStyle : {}) }}
+                disabled={!canUseJukebox}
+                title={canUseJukebox ? 'Brano successivo' : 'Avvicinati al jukebox'}
+                onClick={() => eventBus.emit('jukebox-next')}
+              >
                 Next
               </button>
             </div>
@@ -184,11 +234,13 @@ export const HUD: React.FC = () => {
                   ...smallButtonStyle,
                   color: waiterAwaitingOrder ? '#ffe14d' : '#aaaaff',
                   borderColor: waiterAwaitingOrder ? 'rgba(255,225,77,0.55)' : 'rgba(150,150,255,0.35)',
-                  opacity: waiterCanCall || waiterIsMine ? 1 : 0.62,
+                  opacity: waiterButtonEnabled ? 1 : 0.44,
+                  cursor: waiterButtonEnabled ? 'pointer' : 'default',
                 }}
-                disabled={!waiterCanCall && !waiterIsMine}
+                disabled={!waiterButtonEnabled}
+                title={canUseWaiter ? 'Chiama il cameriere' : 'Avvicinati al cameriere'}
                 onClick={() => {
-                  if (waiterCanCall) eventBus.emit('waiter-call');
+                  if (waiterCanCall && canUseWaiter) eventBus.emit('waiter-call');
                 }}
               >
                 {waiterLabel}
@@ -377,7 +429,9 @@ export const HUD: React.FC = () => {
           pointerEvents: 'auto',
           boxShadow: '0 6px 18px rgba(0,0,0,0.28)',
         }}>
-          <span style={{ color: '#fff4d0', fontSize: '11px' }}>Ordina</span>
+          <span style={{ color: '#fff4d0', fontSize: '11px' }}>
+            Ordina - {PETAL_ACTION_COST} petali
+          </span>
           {ORDER_ITEMS.map((item) => (
             <button
               key={item.id}
@@ -385,8 +439,17 @@ export const HUD: React.FC = () => {
                 ...smallButtonStyle,
                 color: '#ffe14d',
                 borderColor: 'rgba(255,225,77,0.45)',
+                ...(!canUseWaiter || !canAffordAction ? disabledButtonStyle : {}),
               }}
-              onClick={() => eventBus.emit('waiter-order', item.id)}
+              disabled={!canUseWaiter || !canAffordAction}
+              title={!canUseWaiter
+                ? 'Avvicinati al cameriere'
+                : !canAffordAction
+                  ? `Servono ${PETAL_ACTION_COST} petali`
+                  : `${PETAL_ACTION_COST} petali`}
+              onClick={() => {
+                if (canUseWaiter && canAffordAction) eventBus.emit('waiter-order', item.id);
+              }}
             >
               {orderItemLabel(item.id)}
             </button>

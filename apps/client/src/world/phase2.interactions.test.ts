@@ -6,7 +6,13 @@ import {
   normalizeJukeboxState,
 } from '@social-square/shared';
 import { WorldMap } from './WorldMap';
-import { JUKEBOX_OBJECT_ID, SEAT_DEFINITIONS } from './interactions';
+import {
+  INTERACTION_RADIUS_TILES,
+  JUKEBOX_OBJECT_ID,
+  PETAL_ACTION_COST,
+  SEAT_DEFINITIONS,
+  isWithinInteractionRange,
+} from './interactions';
 import { sector as barSector } from './sectors/sector_0_0';
 import { sector as gardenSector } from './sectors/sector_0_1';
 
@@ -26,6 +32,13 @@ describe('phase 2 interaction data', () => {
     expect(JUKEBOX_TRACKS.length).toBeGreaterThanOrEqual(3);
     const lastTrack = JUKEBOX_TRACKS[JUKEBOX_TRACKS.length - 1].id;
     expect(nextJukeboxTrackId(lastTrack)).toBe(DEFAULT_JUKEBOX_TRACK_ID);
+  });
+
+  it('defines proximity and petal costs for location based actions', () => {
+    expect(PETAL_ACTION_COST).toBe(100);
+    expect(INTERACTION_RADIUS_TILES).toBeGreaterThan(2);
+    expect(isWithinInteractionRange({ x: 16, y: 3 }, { x: 17, y: 4 })).toBe(true);
+    expect(isWithinInteractionRange({ x: 16, y: 3 }, { x: 22, y: 8 })).toBe(false);
   });
 
   it('normalizes unknown jukebox state to a safe stopped default', () => {
