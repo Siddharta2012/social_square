@@ -1,0 +1,23 @@
+import Phaser from 'phaser';
+import { GAME_CONFIG } from './config/game.config';
+import { BootScene } from './scenes/BootScene';
+import { MenuScene } from './scenes/MenuScene';
+import { TestRoomScene } from './scenes/rooms/TestRoomScene';
+import { BarScene } from './scenes/rooms/BarScene';
+
+import { createRoot } from 'react-dom/client';
+import { HUD } from './ui/HUD';
+import React from 'react';
+
+const game = new Phaser.Game({
+  ...GAME_CONFIG,
+  scene: [BootScene, MenuScene, TestRoomScene, BarScene],
+});
+
+const hudRoot = document.getElementById('hud-root');
+if (hudRoot) {
+  const root = createRoot(hudRoot);
+  root.render(React.createElement(HUD));
+}
+
+export { game };
