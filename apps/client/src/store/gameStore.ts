@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { HeldItem } from '@social-square/shared';
 
+export type WorldLoadingState = 'initial' | 'streaming' | null;
+
 interface GameState {
   isConnected: boolean;
   currentRoomId: string | null;
@@ -22,6 +24,8 @@ interface GameState {
   setShowAudioSettings: (v: boolean) => void;
   heldItem: HeldItem;
   setHeldItem: (item: HeldItem) => void;
+  worldLoading: WorldLoadingState;
+  setWorldLoading: (state: WorldLoadingState) => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -45,4 +49,6 @@ export const useGameStore = create<GameState>((set) => ({
   setShowAudioSettings: (v) => set({ showAudioSettings: v }),
   heldItem: null,
   setHeldItem: (item) => set({ heldItem: item }),
+  worldLoading: null,
+  setWorldLoading: (state) => set({ worldLoading: state }),
 }));

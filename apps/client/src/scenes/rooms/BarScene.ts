@@ -13,60 +13,7 @@ import { NetworkSystem } from '../../systems/NetworkSystem';
 import { VoiceSystem } from '../../systems/VoiceSystem';
 import { RemoteAvatar } from '../../entities/RemoteAvatar';
 import { InteractStation } from '../../entities/InteractStation';
-import { BaseRoomScene, type RoomConfig, type TileData } from './BaseRoomScene';
-
-// ─── Tile palette ────────────────────────────────────────────────────────────
-const FLOOR_A = 0x3d2b1f;  // dark wood
-const FLOOR_B = 0x4a3525;  // lighter wood
-const OBSTACLE = 0x6b3a2a; // warm brown obstacle
-
-// ─── Room layout helpers ─────────────────────────────────────────────────────
-const COLS = 18;
-const ROWS = 17;
-
-/** Obstacle positions as [col, row] pairs */
-const OBSTACLES: [number, number][] = [
-  // Bar counter — top row
-  [1, 0], [2, 0], [3, 0], [4, 0], [5, 0], [6, 0], [7, 0], [8, 0],
-  // Shelf / wall decoration top-right
-  [15, 0], [16, 0], [17, 0],
-  // Jukebox
-  [16, 3],
-  // Tables (2×1)
-  [4, 5], [5, 5],
-  [12, 5], [13, 5],
-  [4, 10], [5, 10],
-  [12, 10], [13, 10],
-];
-
-function buildBarConfig(): RoomConfig {
-  const tiles: TileData[][] = [];
-
-  for (let row = 0; row < ROWS; row++) {
-    tiles[row] = [];
-    for (let col = 0; col < COLS; col++) {
-      tiles[row][col] = {
-        walkable: true,
-        color: (col + row) % 2 === 0 ? FLOOR_A : FLOOR_B,
-      };
-    }
-  }
-
-  for (const [col, row] of OBSTACLES) {
-    if (row >= 0 && row < ROWS && col >= 0 && col < COLS) {
-      tiles[row][col] = { walkable: false, color: OBSTACLE };
-    }
-  }
-
-  return {
-    cols: COLS,
-    rows: ROWS,
-    tiles,
-    spawnX: 9,
-    spawnY: 14,
-    username: useUserStore.getState().username ?? 'Player',
-  };
-}
+import { BaseRoomScene, type WorldConfig } from './BaseRoomScene';
 
 // ─── Station icon drawing ──────────────────────────────────────────────────────
 // All icons drawn centered on (0,0); base sits ~y=-8 to rest on the raised counter.
@@ -130,8 +77,16 @@ export class BarScene extends BaseRoomScene {
     super('BarScene');
   }
 
-  protected getRoomConfig(): RoomConfig {
-    return buildBarConfig();
+  protected getWorldConfig(): WorldConfig {
+    return {
+      spawnX: 9,
+      spawnY: 14,
+      username: useUserStore.getState().username ?? 'Player',
+    };
+  }
+
+  protected override onLocalMove(x: number, y: number, moving: boolean): void {
+    this._network?.emitMove(x, y, Direction.SE, moving ? 'walk' : 'idle');
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -139,14 +94,6 @@ export class BarScene extends BaseRoomScene {
   create(): void {
     super.create();
     this._setupNetwork();
-
-    // After super.create() the onMove callback is set. Override it to also
-    // broadcast position to the server.
-    const originalOnMove = this.movementSystem.onMove;
-    this.movementSystem.onMove = (x, y, moving) => {
-      originalOnMove?.(x, y, moving);
-      this._network.emitMove(x, y, Direction.SE, moving ? 'walk' : 'idle');
-    };
 
     eventBus.on('exit-room', () => this.scene.start('MenuScene'), this);
     eventBus.on('voice-toggle', () => {
@@ -343,6 +290,7 @@ export class BarScene extends BaseRoomScene {
     this._remoteAvatars.clear();
     this._stations.forEach((s) => s.destroy());
     this._stations = [];
+    this.destroyWorld();
     this.input.setDefaultCursor('default');
     useGameStore.getState().setConnected(false);
     useGameStore.getState().setCurrentRoom(null);

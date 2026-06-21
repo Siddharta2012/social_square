@@ -19,6 +19,7 @@ export const HUD: React.FC = () => {
   const voiceMuted = useGameStore((s) => s.voiceMuted);
   const setVoiceMuted = useGameStore((s) => s.setVoiceMuted);
   const heldItem = useGameStore((s) => s.heldItem);
+  const worldLoading = useGameStore((s) => s.worldLoading);
   const username = useUserStore((s) => s.username);
   const setUser = useUserStore((s) => s.setUser);
 
@@ -183,6 +184,40 @@ export const HUD: React.FC = () => {
             fontWeight: 'bold',
           }}>B</kbd>
           per {heldItem === 'beer' ? 'bere' : 'mangiare'}
+        </div>
+      )}
+
+      {/* World loading feedback */}
+      {worldLoading === 'initial' && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 150,
+          display: 'flex', flexDirection: 'column', gap: '14px',
+          alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(8,8,20,0.95)',
+          color: '#aaaaff', fontFamily: 'monospace', fontSize: '14px',
+          pointerEvents: 'auto',
+        }}>
+          <div style={{
+            width: '28px', height: '28px',
+            border: '3px solid rgba(120,120,255,0.25)',
+            borderTopColor: '#8888ff',
+            borderRadius: '50%',
+            animation: 'spin 0.7s linear infinite',
+          }} />
+          Caricamento mondo...
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+      {worldLoading === 'streaming' && (
+        <div style={{
+          position: 'absolute', top: '48px', right: '12px', zIndex: 150,
+          background: 'rgba(10,10,30,0.85)',
+          border: '1px solid rgba(120,120,255,0.3)',
+          borderRadius: '4px', padding: '5px 10px',
+          color: '#8888cc', fontFamily: 'monospace', fontSize: '11px',
+          pointerEvents: 'none',
+        }}>
+          Caricamento area...
         </div>
       )}
 

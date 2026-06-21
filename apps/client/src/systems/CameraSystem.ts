@@ -47,6 +47,11 @@ export class CameraSystem {
     this._camera.startFollow(target, true);
   }
 
+  /** Set follow lerp (1,1 = perfectly centered). */
+  setLerp(x: number, y: number): void {
+    this._camera.setLerp(x, y);
+  }
+
   stopFollow(): void {
     this._target = null;
     this._camera.stopFollow();

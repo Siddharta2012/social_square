@@ -1,12 +1,16 @@
 /**
  * MovementSystem
  * A* pathfinding on the isometric grid + click-to-move logic.
- * Grid is a 2D boolean array: true = walkable, false = obstacle.
+ * Walkability is supplied by an external map-like object.
  */
 
 export interface GridPoint {
   x: number;
   y: number;
+}
+
+export interface Walkable {
+  isWalkable(x: number, y: number): boolean;
 }
 
 interface AStarNode {
@@ -19,9 +23,7 @@ interface AStarNode {
 }
 
 export class MovementSystem {
-  private _grid: boolean[][];
-  private _cols: number;
-  private _rows: number;
+  private _map: Walkable;
 
   /** Speed in grid cells per second */
   speed: number;
@@ -37,10 +39,8 @@ export class MovementSystem {
   /** Callback fired when position changes */
   onMove?: (x: number, y: number, moving: boolean) => void;
 
-  constructor(grid: boolean[][], speed = 4) {
-    this._grid = grid;
-    this._rows = grid.length;
-    this._cols = grid[0]?.length ?? 0;
+  constructor(map: Walkable, speed = 4) {
+    this._map = map;
     this.speed = speed;
   }
 
@@ -184,14 +184,11 @@ export class MovementSystem {
   }
 
   private _isWalkable(x: number, y: number): boolean {
-    if (x < 0 || y < 0 || x >= this._cols || y >= this._rows) return false;
-    return this._grid[y][x];
+    return this._map.isWalkable(x, y);
   }
 
-  /** Replace the walkability grid (e.g. after obstacles change). */
-  setGrid(grid: boolean[][]): void {
-    this._grid = grid;
-    this._rows = grid.length;
-    this._cols = grid[0]?.length ?? 0;
+  /** Replace the walkability source. */
+  setMap(map: Walkable): void {
+    this._map = map;
   }
 }
