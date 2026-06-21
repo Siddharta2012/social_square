@@ -91,6 +91,13 @@ function build(): SectorData {
     tiles[0][x] = { walkable: false, color: HEDGE, topColor: 0x376d30, detail: 'hedge', accentColor: 0x5f9a48 };
   }
 
+  // South boulevard exit: extend the central path down to the bottom edge and
+  // open the southern hedge at cols 10-11 → connects to the "Vialone delle Ville" (1,2).
+  for (let y = 13; y < SECTOR_SIZE; y++) {
+    tiles[y][10] = { walkable: true, color: PATH, detail: 'path', accentColor: 0xb8aa7a };
+    tiles[y][11] = { walkable: true, color: PATH, detail: 'path', accentColor: 0xb8aa7a };
+  }
+
   for (const [x, y] of SOLID_DECORATIONS) {
     tiles[y][x] = { ...tiles[y][x], walkable: false };
   }

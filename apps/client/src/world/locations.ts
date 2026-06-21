@@ -14,6 +14,9 @@ const LOCATIONS = new Map<string, string>([
   [sectorKey(1, 0), 'Via delle botteghe'],
   [sectorKey(2, 0), 'Lungocanale'],
   [sectorKey(2, 1), 'Quartiere residenziale'],
+  [sectorKey(1, 2), 'Vialone delle Ville'],
+  [sectorKey(0, 2), 'Villa Aurora'],
+  [sectorKey(2, 2), 'Villa Belvedere'],
 ]);
 
 export function locationForPosition(position: Position): WorldLocation {
