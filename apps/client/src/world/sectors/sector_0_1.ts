@@ -59,7 +59,7 @@ function build(): SectorData {
       tiles[y][11] = { walkable: true, color: PATH, detail: 'path', accentColor: 0xb8aa7a };
     }
   }
-  for (let x = 7; x < 20; x++) {
+  for (let x = 7; x < SECTOR_SIZE; x++) {
     tiles[13][x] = { walkable: true, color: PATH, detail: 'path', accentColor: 0xb8aa7a };
   }
 

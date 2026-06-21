@@ -28,7 +28,13 @@ export type DecorationKind =
   | 'gardenTable'
   | 'stringLight'
   | 'flowerPatch'
-  | 'grassTuft';
+  | 'grassTuft'
+  | 'streetLamp'
+  | 'fountain'
+  | 'marketStall'
+  | 'shopFront'
+  | 'signpost'
+  | 'planter';
 
 export interface DecorationData {
   kind: DecorationKind;

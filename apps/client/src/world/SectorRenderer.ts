@@ -242,6 +242,32 @@ export class SectorRenderer {
         this._drawGrassTuft(gfx, decoration);
         container.setDepth(IsometricSystem.depth(gx, gy) + 0.02);
         break;
+      case 'streetLamp':
+        this._drawStreetLamp(gfx, light, decoration);
+        lights.push(this._registerLight(light, 0.72));
+        container.setDepth(IsometricSystem.depth(gx, gy) + 0.18);
+        break;
+      case 'fountain':
+        this._drawFountain(gfx, light, decoration);
+        lights.push(this._registerLight(light, 0.2));
+        container.setDepth(IsometricSystem.depth(gx, gy) + 0.16);
+        break;
+      case 'marketStall':
+        this._drawMarketStall(gfx, decoration);
+        container.setDepth(IsometricSystem.depth(gx, gy) + 0.15);
+        break;
+      case 'shopFront':
+        this._drawShopFront(gfx, decoration);
+        container.setDepth(IsometricSystem.depth(gx, gy) - 0.22);
+        break;
+      case 'signpost':
+        this._drawSignpost(gfx, decoration);
+        container.setDepth(IsometricSystem.depth(gx, gy) + 0.12);
+        break;
+      case 'planter':
+        this._drawPlanter(gfx, decoration);
+        container.setDepth(IsometricSystem.depth(gx, gy) + 0.08);
+        break;
     }
 
     return container;
@@ -470,6 +496,119 @@ export class SectorRenderer {
       const x = -10 + i * 5;
       const h = 7 + ((i + (decoration.variant ?? 0)) % 4);
       gfx.lineBetween(x, 0, x + 2, -h);
+    }
+  }
+
+  private _drawStreetLamp(
+    gfx: Phaser.GameObjects.Graphics,
+    light: Phaser.GameObjects.Graphics,
+    decoration: DecorationData,
+  ): void {
+    this._softShadow(gfx, 25, 8, 4);
+    gfx.lineStyle(4, 0x2d2d35, 1);
+    gfx.lineBetween(0, -2, 0, -58);
+    gfx.lineStyle(2, 0x4a4a55, 1);
+    gfx.lineBetween(0, -55, 13, -62);
+    gfx.fillStyle(0xffd36d, 1);
+    gfx.fillCircle(17, -64, 6);
+    gfx.fillStyle(0xffffff, 0.45);
+    gfx.fillCircle(15, -66, 2);
+    light.fillStyle(decoration.accentColor ?? 0xffd36d, 1);
+    light.fillCircle(17, -64, 36);
+  }
+
+  private _drawFountain(
+    gfx: Phaser.GameObjects.Graphics,
+    light: Phaser.GameObjects.Graphics,
+    decoration: DecorationData,
+  ): void {
+    const stone = decoration.color ?? 0x8794a0;
+    this._softShadow(gfx, 70, 22, 8);
+    gfx.fillStyle(this._shade(stone, 0.64), 1);
+    gfx.fillEllipse(0, -8, 66, 27);
+    gfx.fillStyle(stone, 1);
+    gfx.fillEllipse(0, -15, 58, 22);
+    gfx.fillStyle(0x5ec7dd, 0.88);
+    gfx.fillEllipse(0, -17, 45, 14);
+    gfx.fillStyle(this._shade(stone, 1.1), 1);
+    gfx.fillRoundedRect(-7, -42, 14, 28, 5);
+    gfx.fillStyle(0x9ee8ff, 0.95);
+    gfx.fillCircle(0, -48, 5);
+    gfx.lineStyle(2, 0x9ee8ff, 0.8);
+    gfx.lineBetween(0, -47, -12, -25);
+    gfx.lineBetween(0, -47, 12, -25);
+    light.fillStyle(0x7fdfff, 1);
+    light.fillCircle(0, -31, 24);
+  }
+
+  private _drawMarketStall(gfx: Phaser.GameObjects.Graphics, decoration: DecorationData): void {
+    const cloth = decoration.color ?? 0xd94f5c;
+    this._softShadow(gfx, 62, 18, 5);
+    gfx.fillStyle(0x6b4427, 1);
+    gfx.fillRoundedRect(-26, -20, 52, 18, 3);
+    gfx.fillStyle(this._shade(cloth, 0.78), 1);
+    gfx.fillRect(-29, -45, 58, 16);
+    gfx.fillStyle(cloth, 1);
+    for (let i = 0; i < 4; i++) {
+      const x = -29 + i * 15;
+      gfx.fillRect(x, -45, 10, 16);
+    }
+    gfx.lineStyle(3, 0x4c3325, 1);
+    gfx.lineBetween(-23, -29, -23, 1);
+    gfx.lineBetween(23, -29, 23, 1);
+    gfx.fillStyle(0xf2cc5d, 1);
+    gfx.fillCircle(-10, -22, 4);
+    gfx.fillStyle(0x6fbf56, 1);
+    gfx.fillCircle(5, -22, 4);
+    gfx.fillStyle(0xe85d75, 1);
+    gfx.fillCircle(15, -20, 3);
+  }
+
+  private _drawShopFront(gfx: Phaser.GameObjects.Graphics, decoration: DecorationData): void {
+    const wall = decoration.color ?? 0x7c6752;
+    const awning = decoration.accentColor ?? 0x4d9de0;
+    gfx.fillStyle(this._shade(wall, 0.62), 1);
+    gfx.fillRect(-34, -78, 68, 65);
+    gfx.fillStyle(wall, 1);
+    gfx.fillRect(-31, -82, 62, 63);
+    gfx.fillStyle(0x2d2430, 1);
+    gfx.fillRect(-10, -47, 20, 28);
+    gfx.fillStyle(0x9ad7ff, 0.72);
+    gfx.fillRect(-26, -68, 15, 15);
+    gfx.fillRect(12, -68, 15, 15);
+    gfx.fillStyle(awning, 1);
+    gfx.fillRect(-34, -82, 68, 10);
+    for (let i = 0; i < 5; i++) {
+      gfx.fillStyle(i % 2 === 0 ? awning : 0xfff4d0, 1);
+      gfx.fillRect(-34 + i * 14, -72, 14, 9);
+    }
+    gfx.lineStyle(1, 0x000000, 0.35);
+    gfx.strokeRect(-31, -82, 62, 63);
+  }
+
+  private _drawSignpost(gfx: Phaser.GameObjects.Graphics, decoration: DecorationData): void {
+    gfx.lineStyle(4, 0x5b3a22, 1);
+    gfx.lineBetween(0, 0, 0, -42);
+    gfx.fillStyle(decoration.color ?? 0x8a5a35, 1);
+    gfx.fillRoundedRect(-24, -45, 48, 15, 3);
+    gfx.lineStyle(1, 0x2d1c12, 0.7);
+    gfx.strokeRoundedRect(-24, -45, 48, 15, 3);
+    gfx.fillStyle(0xfff4d0, 0.85);
+    gfx.fillRect(-15, -39, 30, 2);
+  }
+
+  private _drawPlanter(gfx: Phaser.GameObjects.Graphics, decoration: DecorationData): void {
+    this._softShadow(gfx, 38, 11, 5);
+    gfx.fillStyle(decoration.color ?? 0x8a4b2a, 1);
+    gfx.fillRoundedRect(-19, -14, 38, 14, 4);
+    gfx.fillStyle(0x3b2318, 0.75);
+    gfx.fillEllipse(0, -15, 32, 9);
+    const flower = decoration.accentColor ?? 0xf2cc5d;
+    for (const x of [-10, 0, 10]) {
+      gfx.lineStyle(2, 0x3f7f3a, 1);
+      gfx.lineBetween(x, -15, x, -28);
+      gfx.fillStyle(flower, 1);
+      gfx.fillCircle(x, -30, 3);
     }
   }
 
