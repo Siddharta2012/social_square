@@ -4,7 +4,7 @@ import { useGameStore } from '../../../store/gameStore';
 import { PETAL_ACTION_COST } from '../../../world/interactions';
 import type { BarSceneContext } from './barSceneContext';
 
-export function onShutdown(this: BarSceneContext): void {
+export function removeSceneEventListeners(this: BarSceneContext): void {
   eventBus.off('exit-room');
   eventBus.off('voice-toggle');
   eventBus.off('audio-input-change');
@@ -37,6 +37,10 @@ export function onShutdown(this: BarSceneContext): void {
   this.input.keyboard?.off('keydown-J');
   this.input.keyboard?.off('keydown-M');
   this.input.off(Phaser.Input.Events.POINTER_DOWN, this._primePetalAudio, this);
+}
+
+export function onShutdown(this: BarSceneContext): void {
+  removeSceneEventListeners.call(this);
   this._jukebox.destroy();
   this._network.leaveRoom('bar');
   this._network.disconnect();

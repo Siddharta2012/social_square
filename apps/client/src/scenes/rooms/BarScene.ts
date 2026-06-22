@@ -157,6 +157,7 @@ export class BarScene extends BaseRoomScene {
   }
 
   create(): void {
+    this._removeSceneEventListeners();
     super.create();
     this._loadMutedVoiceUsers();
     this._setupNetwork();
@@ -711,6 +712,10 @@ export class BarScene extends BaseRoomScene {
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
+
+  private _removeSceneEventListeners(): void {
+    shutdownMethods.removeSceneEventListeners.call(this as unknown as BarSceneContext);
+  }
 
   private _onShutdown(): void {
     shutdownMethods.onShutdown.call(this as unknown as BarSceneContext);
