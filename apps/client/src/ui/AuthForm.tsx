@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { AvatarConfig } from '@social-square/shared';
 import { fetchAuthConfig, type AuthConfig } from '../api/account';
+import { t } from '../i18n';
+import type { AvatarConfig, UserProgressSnapshot } from '@social-square/shared';
 
 interface AuthSuccess {
   userId: string;
@@ -8,6 +9,8 @@ interface AuthSuccess {
   token: string;
   petals: number;
   avatarConfig: AvatarConfig;
+  unlockedItems?: string[];
+  progress?: UserProgressSnapshot | null;
 }
 
 interface AuthFormProps {
@@ -64,7 +67,11 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
   const [loadingMsg, setLoadingMsg] = useState('');
   const [config, setConfig] = useState<AuthConfig>({ googleEnabled: false, devPasswordLogin: false });
   const [configLoading, setConfigLoading] = useState(true);
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
+  const [tosAccepted, setTosAccepted] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const consentReady = ageConfirmed && tosAccepted;
 
   useEffect(() => {
     void fetchAuthConfig()
@@ -78,10 +85,14 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
       setError('Google OAuth non configurato nel server');
       return;
     }
+    if (!consentReady) {
+      setError('Conferma eta e condizioni per continuare');
+      return;
+    }
     setError('');
     setLoading(true);
     setLoadingMsg('Apertura Google...');
-    window.location.href = '/api/auth/google/start';
+    window.location.href = '/api/auth/google/start?age=1&tos=1';
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -91,8 +102,12 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
       setError('Username: 2-30 caratteri');
       return;
     }
-    if (password.length < 4) {
-      setError('Password: minimo 4 caratteri');
+    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+      setError('Password: minimo 8 caratteri, lettere e numeri');
+      return;
+    }
+    if (mode === 'register' && !consentReady) {
+      setError('Conferma eta e condizioni per registrarti');
       return;
     }
 
@@ -101,10 +116,12 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
     setError('');
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(`/api/auth/${mode === 'register' ? 'register' : 'login'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: u, password }),
+        body: JSON.stringify(mode === 'register'
+          ? { username: u, password, ageConfirmed, tosAccepted }
+          : { username: u, password }),
       });
       const data = await res.json() as Partial<AuthSuccess> & { isNew?: boolean; error?: string };
 
@@ -122,6 +139,8 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
         token: data.token,
         petals: data.petals ?? 0,
         avatarConfig: data.avatarConfig,
+        unlockedItems: data.unlockedItems,
+        progress: data.progress ?? null,
       });
     } catch {
       setError('Impossibile contattare il server');
@@ -136,8 +155,31 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
           Social Square
         </h2>
         <p style={{ margin: '0 0 22px', fontSize: '11px', color: '#7777aa', lineHeight: 1.45 }}>
-          Accesso richiesto per salvare personaggio e petali.
+          {t('auth.requiredSave')}
         </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
+          <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', fontSize: '10px', color: '#aaaadd', lineHeight: 1.35 }}>
+            <input
+              type="checkbox"
+              checked={ageConfirmed}
+              onChange={(e) => setAgeConfirmed(e.target.checked)}
+              disabled={loading}
+              style={{ marginTop: '1px' }}
+            />
+            <span>Confermo di avere almeno 13 anni.</span>
+          </label>
+          <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', fontSize: '10px', color: '#aaaadd', lineHeight: 1.35 }}>
+            <input
+              type="checkbox"
+              checked={tosAccepted}
+              onChange={(e) => setTosAccepted(e.target.checked)}
+              disabled={loading}
+              style={{ marginTop: '1px' }}
+            />
+            <span>Accetto le condizioni d&apos;uso e il trattamento essenziale dei dati.</span>
+          </label>
+        </div>
 
         <button
           type="button"
@@ -163,6 +205,34 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
 
         {config.devPasswordLogin && (
           <form onSubmit={handleSubmit} style={{ marginTop: '22px', borderTop: '1px solid rgba(150,150,255,0.18)', paddingTop: '18px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '14px' }}>
+              <button
+                type="button"
+                onClick={() => setMode('login')}
+                style={{
+                  ...buttonStyle,
+                  marginTop: 0,
+                  background: mode === 'login' ? 'rgba(68,255,136,0.2)' : 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(68,255,136,0.35)',
+                  color: '#dfffee',
+                }}
+              >
+                Login
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('register')}
+                style={{
+                  ...buttonStyle,
+                  marginTop: 0,
+                  background: mode === 'register' ? 'rgba(68,255,136,0.2)' : 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(68,255,136,0.35)',
+                  color: '#dfffee',
+                }}
+              >
+                Registrati
+              </button>
+            </div>
             <label style={{ fontSize: '11px', color: '#8888aa' }}>
               Dev username
               <input
@@ -186,8 +256,8 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="min 4 caratteri"
-                minLength={4}
+                placeholder="min 8, lettere e numeri"
+                minLength={8}
                 autoComplete="current-password"
                 disabled={loading}
               />
@@ -204,7 +274,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
                 cursor: loading ? 'default' : 'pointer',
               }}
             >
-              {loading ? loadingMsg : 'Entra in dev'}
+              {loading ? loadingMsg : t('auth.devEnter')}
             </button>
           </form>
         )}

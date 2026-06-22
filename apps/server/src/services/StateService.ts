@@ -25,14 +25,27 @@ export class StateService {
     return `wallet:petal:${userId}:${locationId}:${pointKey}`;
   }
 
+  private async touchRoomUsers(roomId: string): Promise<void> {
+    await redis.expire(this.userKey(roomId), TTL);
+  }
+
+  private async touchRoomObjects(roomId: string): Promise<void> {
+    await redis.expire(this.objectKey(roomId), TTL);
+  }
+
   async addUser(roomId: string, userState: UserState): Promise<void> {
     const k = this.userKey(roomId);
     await redis.hset(k, userState.userId, JSON.stringify(userState));
-    await redis.expire(k, TTL);
+    await this.touchRoomUsers(roomId);
   }
 
   async removeUser(roomId: string, userId: string): Promise<void> {
-    await redis.hdel(this.userKey(roomId), userId);
+    const users = this.userKey(roomId);
+    await redis.hdel(users, userId);
+    if (await redis.hlen(users) === 0) {
+      await redis.del(users);
+      await redis.del(this.objectKey(roomId));
+    }
   }
 
   async updatePosition(roomId: string, userId: string, position: Position): Promise<void> {
@@ -42,6 +55,7 @@ export class StateService {
     const userState: UserState = JSON.parse(raw);
     userState.position = position;
     await redis.hset(k, userId, JSON.stringify(userState));
+    await this.touchRoomUsers(roomId);
   }
 
   async updatePose(roomId: string, userId: string, position: Position, avatarState: AvatarState): Promise<void> {
@@ -52,6 +66,7 @@ export class StateService {
     userState.position = position;
     userState.state = avatarState;
     await redis.hset(k, userId, JSON.stringify(userState));
+    await this.touchRoomUsers(roomId);
   }
 
   async updateAvatarState(roomId: string, userId: string, avatarState: AvatarState): Promise<void> {
@@ -61,6 +76,17 @@ export class StateService {
     const userState: UserState = JSON.parse(raw);
     userState.state = avatarState;
     await redis.hset(k, userId, JSON.stringify(userState));
+    await this.touchRoomUsers(roomId);
+  }
+
+  async updateAvatarConfig(roomId: string, userId: string, avatarConfig: AvatarConfig): Promise<void> {
+    const k = this.userKey(roomId);
+    const raw = await redis.hget(k, userId);
+    if (!raw) return;
+    const userState: UserState = JSON.parse(raw);
+    userState.avatarConfig = avatarConfig;
+    await redis.hset(k, userId, JSON.stringify(userState));
+    await this.touchRoomUsers(roomId);
   }
 
   async updateHeldItem(roomId: string, userId: string, heldItem: HeldItem): Promise<void> {
@@ -70,6 +96,7 @@ export class StateService {
     const userState: UserState = JSON.parse(raw);
     userState.heldItem = heldItem;
     await redis.hset(k, userId, JSON.stringify(userState));
+    await this.touchRoomUsers(roomId);
   }
 
   async getObjectState(roomId: string, objectId: string): Promise<ObjectState | null> {
@@ -80,7 +107,7 @@ export class StateService {
   async updateObjectState(roomId: string, objectId: string, objectState: ObjectState): Promise<void> {
     const k = this.objectKey(roomId);
     await redis.hset(k, objectId, JSON.stringify(objectState));
-    await redis.expire(k, TTL);
+    await this.touchRoomObjects(roomId);
   }
 
   async clearObjectOccupancy(roomId: string, userId: string): Promise<Array<{ objectId: string; state: ObjectState }>> {
@@ -117,6 +144,27 @@ export class StateService {
 
   async getUserCount(roomId: string): Promise<number> {
     return redis.hlen(this.userKey(roomId));
+  }
+
+  async findUserPresence(userId: string): Promise<{
+    userId: string;
+    username: string;
+    roomId: string;
+    position: Position;
+  } | null> {
+    const keys = await redis.keys('room:*:users');
+    for (const key of keys) {
+      const raw = await redis.hget(key, userId);
+      if (!raw) continue;
+      const userState: UserState = JSON.parse(raw);
+      return {
+        userId: userState.userId,
+        username: userState.username,
+        roomId: key.slice('room:'.length, -':users'.length),
+        position: userState.position,
+      };
+    }
+    return null;
   }
 
   async reservePetalCollect(

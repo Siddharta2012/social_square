@@ -1,24 +1,34 @@
-import express from 'express';
 import { createServer } from 'http';
 import path from 'path';
 import cors from 'cors';
-import { createSocketServer } from './socket/socketServer';
-import { redis } from './config/redis';
+import express from 'express';
 import { authRouter } from './api/routes/auth';
+import { moderationRouter } from './api/routes/moderation';
+import { privateRoomsRouter } from './api/routes/privateRooms';
+import { shopRouter } from './api/routes/shop';
+import { socialRouter } from './api/routes/social';
 import { voiceRouter } from './api/routes/voice';
+import { databaseReady } from './config/database';
+import { env } from './config/env';
+import { redis } from './config/redis';
 import { isLiveKitConfigured } from './services/VoiceService';
+import { createSocketServer } from './socket/socketServer';
+import { installGlobalErrorHandlers } from './utils/errorReporter';
+import { requireAdmin, securityHeaders } from './utils/httpSecurity';
 import { logInfo, logWarn } from './utils/logger';
+import { metricsSnapshot } from './utils/metrics';
 
-const PORT = process.env.PORT ?? 3000;
+installGlobalErrorHandlers();
 
 const app = express();
 app.set('trust proxy', 1);
+app.use(securityHeaders);
 // In production the client is served from this same server (same origin),
 // so CORS is only needed in dev. Allow CLIENT_URL or fall back to permissive.
-app.use(cors({ origin: process.env.CLIENT_URL ?? (process.env.NODE_ENV === 'production' ? false : 'http://localhost:5173') }));
-app.use(express.json());
+app.use(cors({ origin: env.NODE_ENV === 'production' ? false : env.CLIENT_URL }));
+app.use(express.json({ limit: '64kb' }));
 
-app.get('/api/health', async (_req, res) => {
+async function redisReady(): Promise<{ ok: boolean; error?: string }> {
   let redisOk = false;
   let redisError: string | undefined;
   try {
@@ -28,24 +38,43 @@ app.get('/api/health', async (_req, res) => {
     redisError = err instanceof Error ? err.message : String(err);
   }
 
-  const googleConfigured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REDIRECT_URI);
+  return { ok: redisOk, error: redisError };
+}
+
+app.get('/api/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    environment: env.NODE_ENV,
+  });
+});
+
+app.get('/api/ready', async (_req, res) => {
+  const [redisCheck, databaseCheck] = await Promise.all([redisReady(), databaseReady()]);
   const checks = {
-    redis: redisOk,
+    redis: redisCheck.ok,
+    database: databaseCheck.ok,
     livekit: isLiveKitConfigured(),
-    google: googleConfigured,
-    jwt: Boolean(process.env.JWT_SECRET),
+    google: env.GOOGLE_ENABLED,
+    jwt: Boolean(env.JWT_SECRET),
   };
-  const ok = checks.redis && checks.jwt;
+  const ok = checks.redis && checks.database && checks.jwt;
   res.status(ok ? 200 : 503).json({
     status: ok ? 'ok' : 'degraded',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV ?? 'development',
+    environment: env.NODE_ENV,
     checks,
-    redisError,
+    redisError: redisCheck.error,
+    databaseError: databaseCheck.error,
+    databaseSkipped: databaseCheck.skipped,
   });
 });
 
 app.use('/api/auth', authRouter);
+app.use('/api/moderation', moderationRouter);
+app.use('/api/private-rooms', privateRoomsRouter);
+app.use('/api/shop', shopRouter);
+app.use('/api/social', socialRouter);
 app.use('/api/voice', voiceRouter);
 
 app.get('/api/rooms', (_req, res) => {
@@ -57,31 +86,35 @@ app.get('/api/rooms', (_req, res) => {
   ]);
 });
 
-app.get('/api/admin/debug', async (_req, res) => {
-  if (process.env.NODE_ENV === 'production') {
+app.get('/metrics', requireAdmin, (_req, res) => {
+  res.json({
+    timestamp: new Date().toISOString(),
+    ...metricsSnapshot(),
+  });
+});
+
+app.get('/api/admin/debug', requireAdmin, async (_req, res) => {
+  if (env.NODE_ENV === 'production') {
     res.status(404).json({ error: 'NOT_FOUND' });
     return;
   }
 
-  let redisOk = false;
-  try {
-    redisOk = Boolean(await redis.ping());
-  } catch {
-    redisOk = false;
-  }
+  const [redisCheck, databaseCheck] = await Promise.all([redisReady(), databaseReady()]);
 
   res.json({
-    environment: process.env.NODE_ENV ?? 'development',
-    redisMock: process.env.REDIS_MOCK === 'true' || !process.env.REDIS_URL,
-    redisOk,
+    environment: env.NODE_ENV,
+    redisMock: env.USE_REDIS_MOCK,
+    redisOk: redisCheck.ok,
+    databaseOk: databaseCheck.ok,
+    databaseSkipped: databaseCheck.skipped,
     livekitConfigured: isLiveKitConfigured(),
-    googleConfigured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REDIRECT_URI),
-    clientUrl: process.env.CLIENT_URL ?? null,
+    googleConfigured: env.GOOGLE_ENABLED,
+    clientUrl: env.CLIENT_URL,
   });
 });
 
-app.get('/admin/debug', (_req, res) => {
-  if (process.env.NODE_ENV === 'production') {
+app.get('/admin/debug', requireAdmin, (_req, res) => {
+  if (env.NODE_ENV === 'production') {
     res.status(404).send('Not found');
     return;
   }
@@ -111,7 +144,7 @@ app.get('/admin/debug', (_req, res) => {
 });
 
 // Serve the built client in production
-if (process.env.NODE_ENV === 'production') {
+if (env.NODE_ENV === 'production') {
   const clientDist = path.join(__dirname, '../../client/dist');
   app.use(express.static(clientDist));
   // SPA fallback — all non-API routes serve index.html
@@ -124,12 +157,12 @@ const httpServer = createServer(app);
 createSocketServer(httpServer);
 
 // Connect to Redis only if not using the in-memory mock
-if (process.env.REDIS_MOCK !== 'true') {
+if (!env.USE_REDIS_MOCK) {
   (redis as import('ioredis').Redis).connect?.().catch((err: Error) => {
     logWarn('redis.initial_connection_failed', { message: err.message });
   });
 }
 
-httpServer.listen(PORT, () => {
-  logInfo('server.started', { port: PORT, healthUrl: `http://localhost:${PORT}/api/health` });
+httpServer.listen(env.PORT, () => {
+  logInfo('server.started', { port: env.PORT, healthUrl: `http://localhost:${env.PORT}/api/health` });
 });

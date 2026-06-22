@@ -1,5 +1,5 @@
-import type { Direction, AvatarState } from '@social-square/shared';
 import { Avatar, type AvatarOptions } from './Avatar';
+import type { AvatarConfig, Direction, AvatarState } from '@social-square/shared';
 
 /** Deterministic color from username string. */
 function colorFromUsername(username: string): number {
@@ -25,7 +25,7 @@ export class RemoteAvatar extends Avatar {
   private _targetWorldY: number;
   private readonly _lerpFactor = 0.12;
 
-  constructor(options: Omit<AvatarOptions, 'color' | 'isLocal'>) {
+  constructor(options: Omit<AvatarOptions, 'color' | 'isLocal'> & { avatarConfig?: AvatarConfig }) {
     super({ ...options, color: colorFromUsername(options.username), isLocal: false });
     this._targetWorldX = options.worldX;
     this._targetWorldY = options.worldY;
@@ -37,18 +37,18 @@ export class RemoteAvatar extends Avatar {
     worldY: number,
     _direction: Direction,
     animState: AvatarState,
-  ): void {
+  ): boolean {
     this._targetWorldX = worldX;
     this._targetWorldY = worldY;
     if (animState === 'sit') {
       this.setWorldPosition(worldX, worldY);
       this.playAnimation('sit');
-      return;
+      return false;
     }
 
     if (animState === 'wave' || animState === 'dance' || animState === 'clap') {
       this.playEmote(animState);
-      return;
+      return false;
     }
 
     const moving =
@@ -56,10 +56,11 @@ export class RemoteAvatar extends Avatar {
       Math.abs(this._targetWorldX - this._worldX) > 0.15 ||
       Math.abs(this._targetWorldY - this._worldY) > 0.15;
     this.playAnimation(moving ? 'walk' : 'idle');
+    return this._needsTick();
   }
 
   /** Call once per frame from the owning scene's update(). */
-  tick(): void {
+  tick(): boolean {
     const dx = this._targetWorldX - this._worldX;
     const dy = this._targetWorldY - this._worldY;
 
@@ -68,7 +69,7 @@ export class RemoteAvatar extends Avatar {
         this.setWorldPosition(this._targetWorldX, this._targetWorldY);
         this.playAnimation('idle');
       }
-      return;
+      return false;
     }
 
     // Update facing: in iso space, negative screen-x movement = facing left
@@ -76,5 +77,11 @@ export class RemoteAvatar extends Avatar {
     this.setFacing(dx < 0 || (dx === 0 && dy > 0));
 
     this.setWorldPosition(this._worldX + dx * this._lerpFactor, this._worldY + dy * this._lerpFactor);
+    return true;
+  }
+
+  private _needsTick(): boolean {
+    return Math.abs(this._targetWorldX - this._worldX) >= 0.02 ||
+      Math.abs(this._targetWorldY - this._worldY) >= 0.02;
   }
 }

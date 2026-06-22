@@ -1,5 +1,6 @@
 // Socket.IO event types shared between client and server
 import type { ChatMessage } from '../constants/chat';
+import type { UserProgressSnapshot } from '../constants/progression';
 
 export interface AvatarConfig {
   userId: string;
@@ -56,12 +57,14 @@ export interface RoomState {
 // Client → Server events
 export interface ClientToServerEvents {
   'join-room': (data: { roomId: string; avatarConfig: AvatarConfig }) => void;
+  'avatar-update': (data: { avatarConfig: AvatarConfig }) => void;
   'leave-room': (data: { roomId: string }) => void;
   'move': (data: { x: number; y: number; direction: Direction; state: AvatarState }) => void;
   'interact': (data: { objectId: string; action: string; payload?: ObjectState }) => void;
   'emote': (data: { emoteId: EmoteId }) => void;
   'hold-item': (data: { item: HeldItem }) => void;
   'chat-message': (data: { text: string }) => void;
+  'whisper-message': (data: { toUserId: string; text: string }) => void;
 }
 
 // Server → Client events
@@ -74,6 +77,7 @@ export interface ServerToClientEvents {
     state?: AvatarState;
     heldItem?: HeldItem;
   }) => void;
+  'user-avatar-updated': (data: { userId: string; avatarConfig: AvatarConfig }) => void;
   'user-left': (data: { userId: string }) => void;
   'user-moved': (data: { userId: string; x: number; y: number; direction: Direction; state: AvatarState }) => void;
   'object-state-changed': (data: { objectId: string; state: ObjectState }) => void;
@@ -82,8 +86,21 @@ export interface ServerToClientEvents {
   'item-granted': (data: { item: Exclude<HeldItem, null>; petals?: number; cost: number; source: 'counter' | 'waiter' }) => void;
   'petals-collected': (data: { amount: number; petals: number; position: Position; source: 'flower' | 'daily' | 'event' | 'task'; requestId?: string }) => void;
   'user-chat-message': (data: ChatMessage) => void;
+  'whisper-message': (data: {
+    id: string;
+    fromUserId: string;
+    fromUsername: string;
+    toUserId: string;
+    text: string;
+    sentAt: number;
+  }) => void;
   'room-users-count': (data: { roomId: string; count: number }) => void;
-  'account-updated': (data: { petals?: number; avatarConfig?: AvatarConfig; stats?: Record<string, number> }) => void;
+  'account-updated': (data: {
+    petals?: number;
+    avatarConfig?: AvatarConfig;
+    stats?: Record<string, number>;
+    progress?: UserProgressSnapshot;
+  }) => void;
   'error': (data: { code: string; message: string; requestId?: string }) => void;
 }
 

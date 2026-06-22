@@ -1,5 +1,5 @@
-import type { Position } from '@social-square/shared';
 import { globalToSector, sectorKey } from './coords';
+import type { Position } from '@social-square/shared';
 
 export type LocationId =
   | '0,0'

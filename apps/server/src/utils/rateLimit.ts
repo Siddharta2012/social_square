@@ -1,3 +1,5 @@
+import { redis } from '../config/redis';
+
 export interface RateLimitResult {
   allowed: boolean;
   retryAfterMs: number;
@@ -30,6 +32,15 @@ export class RateLimiter {
     for (const [key, bucket] of this.buckets) {
       if (bucket.resetAt <= now) this.buckets.delete(key);
     }
+  }
+
+  async hitShared(key: string, limit: number, windowMs: number): Promise<RateLimitResult> {
+    const redisKey = `ratelimit:${key}`;
+    const count = await redis.incr(redisKey);
+    if (count === 1) await redis.pexpire(redisKey, windowMs);
+    if (count <= limit) return { allowed: true, retryAfterMs: 0 };
+    const ttl = await redis.pttl(redisKey);
+    return { allowed: false, retryAfterMs: ttl > 0 ? ttl : windowMs };
   }
 }
 

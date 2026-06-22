@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import { CHAT_HISTORY_LIMIT, CHAT_MAX_LENGTH, normalizeChatText, type ChatMessage } from '@social-square/shared';
+import { describe, expect, it } from 'vitest';
 import { useGameStore } from '../store/gameStore';
 
 function message(index: number): ChatMessage {

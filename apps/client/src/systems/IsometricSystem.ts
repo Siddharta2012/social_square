@@ -60,6 +60,7 @@ export class IsometricSystem {
   // -----------------------------------------------------------------------
 
   private _objects: Array<{ gameObject: Phaser.GameObjects.GameObject & { depth: number }; worldX: number; worldY: number }> = [];
+  private _entries = new Map<Phaser.GameObjects.GameObject, { gameObject: Phaser.GameObjects.GameObject & { depth: number }; worldX: number; worldY: number }>();
   private _dirty = false;
 
   register(
@@ -67,12 +68,25 @@ export class IsometricSystem {
     worldX: number,
     worldY: number,
   ): void {
-    this._objects.push({ gameObject, worldX, worldY });
+    const existing = this._entries.get(gameObject);
+    if (existing) {
+      existing.worldX = worldX;
+      existing.worldY = worldY;
+      this._dirty = true;
+      return;
+    }
+
+    const entry = { gameObject, worldX, worldY };
+    this._objects.push(entry);
+    this._entries.set(gameObject, entry);
     this._dirty = true;
   }
 
   unregister(gameObject: Phaser.GameObjects.GameObject): void {
-    const idx = this._objects.findIndex((o) => o.gameObject === gameObject);
+    const entry = this._entries.get(gameObject);
+    if (!entry) return;
+    this._entries.delete(gameObject);
+    const idx = this._objects.indexOf(entry);
     if (idx !== -1) {
       this._objects.splice(idx, 1);
       this._dirty = true;
@@ -84,7 +98,7 @@ export class IsometricSystem {
     worldX: number,
     worldY: number,
   ): void {
-    const entry = this._objects.find((o) => o.gameObject === gameObject);
+    const entry = this._entries.get(gameObject);
     if (entry) {
       entry.worldX = worldX;
       entry.worldY = worldY;
@@ -98,6 +112,7 @@ export class IsometricSystem {
 
   clear(): void {
     this._objects = [];
+    this._entries.clear();
     this._dirty = false;
   }
 

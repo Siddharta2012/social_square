@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import { defaultPoolBalls, type PoolBall } from '@social-square/shared';
+import { describe, expect, it } from 'vitest';
 import { predictAim } from './poolAim';
 
 const DIMS = { tableW: 760, tableH: 380, ballR: 0.025 };

@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   ORDER_ITEMS,
   WAITER_OBJECT_ID,
@@ -7,6 +6,7 @@ import {
   normalizeWaiterState,
   orderItemLabel,
 } from '@social-square/shared';
+import { describe, expect, it } from 'vitest';
 
 describe('phase 5 waiter bot data', () => {
   it('defines a stable waiter object and supported order items', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { WorldMap } from './WorldMap';
 import { SECTOR_SIZE, type SectorData, type TileData } from './types';
+import { WorldMap } from './WorldMap';
 
 function solidSector(sx: number, sy: number, walkable: boolean): SectorData {
   const tiles: TileData[][] = [];

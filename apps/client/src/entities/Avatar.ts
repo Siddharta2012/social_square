@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
-import type { AvatarState, EmoteId, HeldItem } from '@social-square/shared';
 import { IsometricSystem } from '../systems/IsometricSystem';
 import { SpeakingIndicator } from './SpeakingIndicator';
+import type { AvatarConfig, AvatarState, EmoteId, HeldItem } from '@social-square/shared';
 
 export interface AvatarOptions {
   scene: Phaser.Scene;
@@ -10,6 +10,7 @@ export interface AvatarOptions {
   worldY: number;
   color?: number;
   isLocal?: boolean;
+  avatarConfig?: AvatarConfig;
 }
 
 export type AvatarAnimState = AvatarState;
@@ -34,6 +35,7 @@ export class Avatar extends Phaser.GameObjects.Container {
   private _heldItem: HeldItem = null;
   private _emoteText: Phaser.GameObjects.Text | null = null;
   private _chatBubble: Phaser.GameObjects.Container | null = null;
+  private _avatarConfig?: AvatarConfig;
 
   static readonly SPRITE_W = 32;
   static readonly SPRITE_H = 48;
@@ -47,6 +49,7 @@ export class Avatar extends Phaser.GameObjects.Container {
     this._worldX = options.worldX;
     this._worldY = options.worldY;
     this._color = options.color ?? (options.isLocal ? 0x4488ff : 0xff8844);
+    this._avatarConfig = options.avatarConfig;
 
     // Ground shadow
     this._shadow = options.scene.add.graphics();
@@ -164,7 +167,13 @@ export class Avatar extends Phaser.GameObjects.Container {
   }
 
   setSpeaking(speaking: boolean): void {
-    speaking ? this._speakingIndicator.show() : this._speakingIndicator.hide();
+    if (speaking) this._speakingIndicator.show();
+    else this._speakingIndicator.hide();
+  }
+
+  setAvatarConfig(config: AvatarConfig): void {
+    this._avatarConfig = config;
+    this._drawBody();
   }
 
   showChatBubble(message: string): void {
@@ -289,7 +298,17 @@ export class Avatar extends Phaser.GameObjects.Container {
   private _drawBody(): void {
     const g = this._gfx;
     g.clear();
-    const c = this._color;
+    const config = this._avatarConfig;
+    const outfitPalette = [this._color, 0x16856f, 0x7c4dff, 0xd4576a, 0xe5b74a];
+    const skinPalette = [0xfdb89c, 0xe0a07d, 0xc6865b, 0x8d5524, 0xffd0b6];
+    const outfitIndex = Math.max(0, Math.trunc(config?.outfit ?? 0)) % outfitPalette.length;
+    const bodyIndex = Math.max(0, Math.trunc(config?.body ?? 0)) % skinPalette.length;
+    const hairIndex = Math.max(0, Math.trunc(config?.hair ?? 0));
+    const accessoryIndex = Math.max(0, Math.trunc(config?.accessory ?? 0));
+    const expressionIndex = Math.max(0, Math.trunc(config?.expression ?? 0));
+    const c = outfitPalette[outfitIndex];
+    const skinColor = skinPalette[bodyIndex];
+    const hairColor = config?.hairColor ? Number.parseInt(config.hairColor.slice(1), 16) : 0x3a2417;
 
     // Derive a darker leg/pants color from body color
     const lr = Math.max(0, ((c >> 16) & 0xff) - 50);
@@ -316,7 +335,7 @@ export class Avatar extends Phaser.GameObjects.Container {
     g.strokeRoundedRect(-11, -35, 22, 20, 4);
 
     // Head (skin tone)
-    g.fillStyle(0xfdb89c, 1);
+    g.fillStyle(skinColor, 1);
     g.fillCircle(0, -44, 9);
     // Head shading on one side
     g.fillStyle(0x000000, 0.08);
@@ -334,6 +353,32 @@ export class Avatar extends Phaser.GameObjects.Container {
     g.fillStyle(0xffffff, 0.7);
     g.fillCircle(-2.8, -45.7, 0.6);
     g.fillCircle(4.2, -45.7, 0.6);
+
+    if (hairIndex > 0) {
+      g.fillStyle(hairColor, 1);
+      g.fillRoundedRect(-8, -53, 16, 7, 4);
+      g.fillTriangle(-8, -48, -3, -53, -1, -46);
+      if (hairIndex > 1) g.fillTriangle(3, -53, 8, -48, 2, -46);
+    }
+
+    if (accessoryIndex > 0) {
+      g.lineStyle(1.5, 0x17151e, 1);
+      g.strokeCircle(-3.5, -45, 3.2);
+      g.strokeCircle(3.5, -45, 3.2);
+      g.lineBetween(-0.4, -45, 0.4, -45);
+      g.lineStyle(1, 0x85fff4, 0.45);
+      g.lineBetween(-6, -46, -1, -46);
+      g.lineBetween(1, -46, 6, -46);
+    }
+
+    g.lineStyle(1.4, 0x6b2819, 0.75);
+    if (expressionIndex > 0) {
+      g.beginPath();
+      g.arc(0, -41.8, 3.4, 0, Math.PI, false);
+      g.strokePath();
+    } else {
+      g.lineBetween(-2.4, -41.5, 2.4, -41.5);
+    }
   }
 
   private _setBodyPose(y: number, scaleY: number): void {

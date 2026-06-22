@@ -1,40 +1,49 @@
 import jwt from 'jsonwebtoken';
-import type { Socket } from 'socket.io';
+import { env } from '../../config/env';
+import { UserService } from '../../services/UserService';
 import type { ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData } from '@social-square/shared';
+import type { Socket } from 'socket.io';
 
 type IoSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
-
-const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-in-prod';
-const ALLOW_LEGACY_SOCKET_AUTH = process.env.ALLOW_LEGACY_SOCKET_AUTH === 'true';
 
 interface JwtPayload {
   userId: string;
   username: string;
+  tokenVersion: number;
 }
+
+const userService = new UserService();
 
 export function socketAuthMiddleware(
   socket: IoSocket,
   next: (err?: Error) => void,
 ): void {
+  void authenticateSocket(socket, next);
+}
+
+async function authenticateSocket(
+  socket: IoSocket,
+  next: (err?: Error) => void,
+): Promise<void> {
   const { token, username: legacyUsername } = socket.handshake.auth as {
     token?: string;
     username?: string;
   };
 
-  // JWT path (Block B+)
   if (token) {
     try {
-      const payload = jwt.verify(token, JWT_SECRET) as JwtPayload;
-      socket.data.userId = payload.userId;
-      socket.data.username = payload.username;
+      const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+      const user = await userService.findById(payload.userId);
+      if (!user || user.tokenVersion !== payload.tokenVersion) return next(new Error('TOKEN_REVOKED'));
+      socket.data.userId = user.userId;
+      socket.data.username = user.username;
       return next();
     } catch {
       return next(new Error('TOKEN_INVALID'));
     }
   }
 
-  // Legacy path: plain username (Block A — kept for backwards compat during transition)
-  if (ALLOW_LEGACY_SOCKET_AUTH && legacyUsername && typeof legacyUsername === 'string') {
+  if (env.NODE_ENV !== 'production' && env.ALLOW_LEGACY_SOCKET_AUTH && legacyUsername && typeof legacyUsername === 'string') {
     const trimmed = legacyUsername.trim();
     if (trimmed.length >= 2 && trimmed.length <= 30) {
       socket.data.userId = socket.id;
@@ -43,5 +52,5 @@ export function socketAuthMiddleware(
     }
   }
 
-  next(new Error('AUTH_REQUIRED'));
+  return next(new Error('AUTH_REQUIRED'));
 }

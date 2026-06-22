@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SectorLoader, type SectorRegistry } from './SectorLoader';
+import { SECTOR_SIZE, type SectorData } from './types';
 import { WorldMap } from './WorldMap';
 import { WorldStreamer } from './WorldStreamer';
-import { SECTOR_SIZE, type SectorData } from './types';
 
 function emptySector(sx: number, sy: number): SectorData {
   return { sx, sy, tiles: [] };
@@ -56,5 +56,25 @@ describe('WorldStreamer', () => {
     await streamer.update(0, 0);
     expect(states[0]).toBe('initial');
     expect(states[states.length - 1]).toBeNull();
+  });
+
+  it('skips sector work while the player stays in the same sector', async () => {
+    const map = new WorldMap();
+    const load = vi.fn((sx: number, sy: number) => Promise.resolve(emptySector(sx, sy)));
+    const loader = { load } as unknown as SectorLoader;
+    const ready = vi.fn();
+    const loading = vi.fn();
+    const streamer = new WorldStreamer(map, loader, {
+      onSectorReady: ready,
+      onLoadingChange: loading,
+    });
+
+    await streamer.update(0, 0);
+    await streamer.update(1, 1);
+    await streamer.update(SECTOR_SIZE - 1, SECTOR_SIZE - 1);
+
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(ready).toHaveBeenCalledTimes(1);
+    expect(loading).toHaveBeenCalledTimes(2);
   });
 });

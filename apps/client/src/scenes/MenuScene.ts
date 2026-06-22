@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
+import { eventBus } from '../eventBus';
+import { t } from '../i18n';
 import { useGameStore } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';
-import { eventBus } from '../eventBus';
 import { IsometricSystem } from '../systems/IsometricSystem';
 
 interface Particle {
@@ -64,7 +65,7 @@ export class MenuScene extends Phaser.Scene {
 
     // ── Enter button ──────────────────────────────────────────────────────────
     const btn = this.add
-      .text(width / 2, height / 2 + 38, '[ Entra ]', {
+      .text(width / 2, height / 2 + 38, t('menu.enter'), {
         fontSize: '22px', color: '#44ff88', fontFamily: 'monospace',
         stroke: '#006622', strokeThickness: 3,
         backgroundColor: '#00000066', padding: { x: 20, y: 10 },

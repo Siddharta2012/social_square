@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import { SOCKET_URL, MOVE_EMIT_INTERVAL } from '../config/constants';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -11,8 +12,8 @@ import type {
   ObjectState,
   Position,
   RoomState,
+  UserProgressSnapshot,
 } from '@social-square/shared';
-import { SOCKET_URL, MOVE_EMIT_INTERVAL } from '../config/constants';
 
 type NetworkSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -27,6 +28,7 @@ export interface NetworkCallbacks {
     state?: AvatarState;
     heldItem?: HeldItem;
   }) => void;
+  onUserAvatarUpdated?: (data: { userId: string; avatarConfig: AvatarConfig }) => void;
   onUserLeft?: (data: { userId: string }) => void;
   onUserMoved?: (data: {
     userId: string;
@@ -42,7 +44,20 @@ export interface NetworkCallbacks {
   onObjectStateChanged?: (data: { objectId: string; state: ObjectState }) => void;
   onUserEmote?: (data: { userId: string; emoteId: EmoteId }) => void;
   onUserChatMessage?: (data: ChatMessage) => void;
-  onAccountUpdated?: (data: { petals?: number; avatarConfig?: AvatarConfig; stats?: Record<string, number> }) => void;
+  onWhisperMessage?: (data: {
+    id: string;
+    fromUserId: string;
+    fromUsername: string;
+    toUserId: string;
+    text: string;
+    sentAt: number;
+  }) => void;
+  onAccountUpdated?: (data: {
+    petals?: number;
+    avatarConfig?: AvatarConfig;
+    stats?: Record<string, number>;
+    progress?: UserProgressSnapshot;
+  }) => void;
   onError?: (data: { code: string; message: string; requestId?: string }) => void;
 }
 
@@ -50,6 +65,7 @@ export class NetworkSystem {
   private _socket: NetworkSocket | null = null;
   private _callbacks: NetworkCallbacks = {};
   private _lastMoveEmit = 0;
+  private _lastMovePayloadKey = '';
 
   connect(username: string, token?: string): void {
     if (this._socket?.connected) return;
@@ -74,6 +90,7 @@ export class NetworkSystem {
 
     this._socket.on('room-state', (data) => this._callbacks.onRoomState?.(data));
     this._socket.on('user-joined', (data) => this._callbacks.onUserJoined?.(data));
+    this._socket.on('user-avatar-updated', (data) => this._callbacks.onUserAvatarUpdated?.(data));
     this._socket.on('user-left', (data) => this._callbacks.onUserLeft?.(data));
     this._socket.on('user-moved', (data) => this._callbacks.onUserMoved?.(data));
     this._socket.on('room-users-count', (data) => this._callbacks.onRoomUsersCount?.(data));
@@ -83,6 +100,7 @@ export class NetworkSystem {
     this._socket.on('object-state-changed', (data) => this._callbacks.onObjectStateChanged?.(data));
     this._socket.on('user-emote', (data) => this._callbacks.onUserEmote?.(data));
     this._socket.on('user-chat-message', (data) => this._callbacks.onUserChatMessage?.(data));
+    this._socket.on('whisper-message', (data) => this._callbacks.onWhisperMessage?.(data));
     this._socket.on('account-updated', (data) => this._callbacks.onAccountUpdated?.(data));
     this._socket.on('error', (data) => this._callbacks.onError?.(data));
   }
@@ -101,6 +119,10 @@ export class NetworkSystem {
 
   joinRoom(roomId: string, avatarConfig: AvatarConfig): void {
     this._socket?.emit('join-room', { roomId, avatarConfig });
+  }
+
+  updateAvatar(avatarConfig: AvatarConfig): void {
+    this._socket?.emit('avatar-update', { avatarConfig });
   }
 
   leaveRoom(roomId: string): void {
@@ -123,16 +145,25 @@ export class NetworkSystem {
     this._socket?.emit('chat-message', { text });
   }
 
+  emitWhisperMessage(toUserId: string, text: string): void {
+    this._socket?.emit('whisper-message', { toUserId, text });
+  }
+
   /** Throttled to MOVE_EMIT_INTERVAL ms. */
   emitMove(x: number, y: number, direction: Direction, state: AvatarState, force = false): void {
+    if (!this._socket?.connected) return;
+    const payloadKey = `${x.toFixed(2)}:${y.toFixed(2)}:${direction}:${state}`;
+    if (!force && payloadKey === this._lastMovePayloadKey) return;
     const now = Date.now();
     if (!force && now - this._lastMoveEmit < MOVE_EMIT_INTERVAL) return;
     this._lastMoveEmit = now;
-    this._socket?.emit('move', { x, y, direction, state });
+    this._lastMovePayloadKey = payloadKey;
+    this._socket.emit('move', { x, y, direction, state });
   }
 
   disconnect(): void {
     this._socket?.disconnect();
     this._socket = null;
+    this._lastMovePayloadKey = '';
   }
 }

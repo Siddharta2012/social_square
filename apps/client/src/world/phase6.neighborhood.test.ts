@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { MovementSystem } from '../systems/MovementSystem';
 import { SectorLoader } from './SectorLoader';
-import { WorldMap } from './WorldMap';
 import { SECTOR_REGISTRY } from './sectors';
-import { sector as plazaSector } from './sectors/sector_1_1';
 import { sector as streetSector } from './sectors/sector_1_0';
+import { sector as plazaSector } from './sectors/sector_1_1';
 import { sector as riversideSector } from './sectors/sector_2_0';
 import { sector as neighborhoodSector } from './sectors/sector_2_1';
+import { WorldMap } from './WorldMap';
 
 describe('phase 6 village neighborhood expansion', () => {
   it('registers the riverside and neighborhood sectors as async chunks', async () => {

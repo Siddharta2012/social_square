@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   defaultPoolBalls,
   normalizePoolState,
@@ -6,6 +5,7 @@ import {
   type PoolBall,
   type PoolState,
 } from '@social-square/shared';
+import { describe, expect, it } from 'vitest';
 
 function playingState(overrides: Partial<PoolState> = {}): PoolState {
   return normalizePoolState({

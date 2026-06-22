@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { redis } from '../config/redis';
 import { RateLimiter } from './rateLimit';
 
 describe('RateLimiter', () => {
@@ -13,5 +14,14 @@ describe('RateLimiter', () => {
     expect(blocked.retryAfterMs).toBe(800);
 
     expect(limiter.hit('chat:user-1', 2, 1000, 1200).allowed).toBe(true);
+  });
+
+  it('shares limits through Redis-compatible counters', async () => {
+    const limiter = new RateLimiter();
+    const key = `test:${Date.now()}:${Math.random()}`;
+    await redis.del(`ratelimit:${key}`);
+
+    await expect(limiter.hitShared(key, 1, 1000)).resolves.toMatchObject({ allowed: true });
+    await expect(limiter.hitShared(key, 1, 1000)).resolves.toMatchObject({ allowed: false });
   });
 });

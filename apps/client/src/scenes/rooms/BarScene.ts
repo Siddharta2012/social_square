@@ -6,24 +6,47 @@
 
 import {
   Direction,
-  BAR_BEER_POSITION,
-  BAR_PRETZEL_POSITION,
-  BAR_SERVICE_OBJECT_ID,
-  JUKEBOX_PLAY_COST,
-  PETAL_BLOOM_OBJECT_ID,
   POOL_OBJECT_ID,
-  POOL_PLAY_COST,
-  POOL_POSITION,
   WAITER_OBJECT_ID,
-  jukeboxTitle,
   normalizeJukeboxState,
   normalizePoolState,
   normalizeWaiterState,
-  parseJukeboxExternalTrack,
-  serializePoolBalls,
 } from '@social-square/shared';
+import { JukeboxPlayer } from '../../audio/JukeboxPlayer';
+import { InteractStation } from '../../entities/InteractStation';
+import { RemoteAvatar } from '../../entities/RemoteAvatar';
+import { eventBus } from '../../eventBus';
+import { useGameStore } from '../../store/gameStore';
+import { useUserStore } from '../../store/userStore';
+import { NetworkSystem } from '../../systems/NetworkSystem';
+import {
+  INTERACTION_RADIUS_TILES,
+  JUKEBOX_OBJECT_ID,
+  JUKEBOX_POSITION,
+  SEAT_DEFINITIONS,
+  isSeatObjectId,
+  type SeatDefinition,
+} from '../../world/interactions';
+import {
+  locationIdForPosition,
+  type LocationExit,
+  type LocationId,
+} from '../../world/locations';
+import * as jukeboxMethods from './bar/jukeboxMethods';
+import * as locationMethods from './bar/locationMethods';
+import * as networkMethods from './bar/networkMethods';
+import * as petalMethods from './bar/petalMethods';
+import * as poolMethods from './bar/poolMethods';
+import * as remoteMethods from './bar/remoteMethods';
+import * as seatMethods from './bar/seatMethods';
+import * as shutdownMethods from './bar/shutdownMethods';
+import * as stationMethods from './bar/stationMethods';
+import * as voiceMethods from './bar/voiceMethods';
+import * as waiterMethods from './bar/waiterMethods';
+import { BaseRoomScene, type WorldConfig } from './BaseRoomScene';
+import type { PendingPetalCollect, PetalBloom } from './bar/petalMethods';
+import type { VoiceSystem } from '../../systems/VoiceSystem';
 import type {
-  AvatarConfig,
   AvatarState,
   ChatMessage,
   EmoteId,
@@ -34,168 +57,19 @@ import type {
   PoolBall,
   Position,
   WaiterState,
+  AvatarConfig,
 } from '@social-square/shared';
-import { JukeboxPlayer } from '../../audio/JukeboxPlayer';
-import { useUserStore } from '../../store/userStore';
-import { useGameStore } from '../../store/gameStore';
-import { eventBus } from '../../eventBus';
-import { NetworkSystem } from '../../systems/NetworkSystem';
-import { VoiceSystem } from '../../systems/VoiceSystem';
-import { IsometricSystem } from '../../systems/IsometricSystem';
-import { RemoteAvatar } from '../../entities/RemoteAvatar';
-import { InteractStation } from '../../entities/InteractStation';
-import {
-  INTERACTION_RADIUS_TILES,
-  JUKEBOX_OBJECT_ID,
-  JUKEBOX_POSITION,
-  PETAL_ACTION_COST,
-  SEAT_DEFINITIONS,
-  isSeatObjectId,
-  isWithinInteractionRange,
-  petalPointKey,
-  petalSpawnConfigForLocation,
-  type SeatDefinition,
-} from '../../world/interactions';
-import {
-  exitsForLocation,
-  locationForId,
-  locationForPosition,
-  locationIdForPosition,
-  targetName,
-  type LocationExit,
-  type LocationId,
-} from '../../world/locations';
-import { BaseRoomScene, type WorldConfig } from './BaseRoomScene';
 
 // ─── Station icon drawing ──────────────────────────────────────────────────────
 // All icons drawn centered on (0,0); base sits ~y=-26 to rest on the counter top
 // (the counter surface is at roughly y=-26; lower values would land on the front face).
 
-function drawBeerTap(g: Phaser.GameObjects.Graphics): void {
-  // Metal base
-  g.fillStyle(0x2b2b30, 1);
-  g.fillRoundedRect(-7, -32, 14, 8, 2);
-  // Column
-  g.fillStyle(0xcfcfd8, 1);
-  g.fillRect(-3, -48, 6, 18);
-  g.lineStyle(1, 0x000000, 0.25);
-  g.strokeRect(-3, -48, 6, 18);
-  // Spout
-  g.fillStyle(0xcfcfd8, 1);
-  g.fillRect(-3, -48, 11, 4);
-  g.fillRect(5, -48, 4, 8);
-  // Handle knob
-  g.fillStyle(0x111111, 1);
-  g.fillRect(-1.5, -56, 3, 8);
-  g.fillStyle(0xff4d4d, 1);
-  g.fillCircle(0, -56, 3.5);
-  g.fillStyle(0xffffff, 0.4);
-  g.fillCircle(-1, -57, 1);
-}
-
-function drawPretzelStand(g: Phaser.GameObjects.Graphics): void {
-  // Board / tray
-  g.fillStyle(0x6b3a2a, 1);
-  g.fillRoundedRect(-12, -30, 24, 7, 2);
-  g.lineStyle(1, 0x000000, 0.3);
-  g.strokeRoundedRect(-12, -30, 24, 7, 2);
-  // Two pretzels stacked
-  for (const [ox, oy] of [[-5, -34], [5, -36]] as [number, number][]) {
-    g.lineStyle(3, 0x8a4b1e, 1);
-    g.strokeCircle(ox - 2.5, oy, 3.5);
-    g.strokeCircle(ox + 2.5, oy, 3.5);
-    g.lineStyle(3, 0x9c5a28, 1);
-    g.beginPath();
-    g.arc(ox, oy + 2, 4.5, Phaser.Math.DegToRad(20), Phaser.Math.DegToRad(160), false);
-    g.strokePath();
-    g.fillStyle(0xffffff, 0.85);
-    g.fillCircle(ox - 2, oy - 1, 0.7);
-    g.fillCircle(ox + 2, oy, 0.7);
-  }
-}
-
 // ─── Scene ───────────────────────────────────────────────────────────────────
-function drawPetalBloom(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(0x000000, 0.18);
-  g.fillEllipse(0, 3, 28, 10);
-  g.lineStyle(2, 0x2e7d36, 1);
-  g.lineBetween(0, 0, 0, -22);
-  g.lineBetween(0, -9, -9, -15);
-  g.lineBetween(0, -10, 9, -16);
-
-  const colors = [0xffd166, 0xe85d75, 0x9b7cff, 0xffffff];
-  for (let i = 0; i < 8; i++) {
-    const angle = (Math.PI * 2 * i) / 8;
-    const x = Math.cos(angle) * 9;
-    const y = -24 + Math.sin(angle) * 5;
-    g.fillStyle(colors[i % colors.length], 1);
-    g.fillEllipse(x, y, 6, 4);
-  }
-  g.fillStyle(0xfff4d0, 1);
-  g.fillCircle(0, -24, 3);
-
-  for (const [x, y, color] of [
-    [-13, -2, 0xffd166],
-    [-5, 5, 0xe85d75],
-    [8, 1, 0x9b7cff],
-    [15, 5, 0xffffff],
-  ] as Array<[number, number, number]>) {
-    g.fillStyle(color, 0.95);
-    g.fillEllipse(x, y, 5, 3);
-  }
-}
-
-function drawHotspot(_g: Phaser.GameObjects.Graphics): void {
-  _g.fillStyle(0xffffff, 0.001);
-  _g.fillRect(-32, -56, 64, 56);
-}
-
-function drawExitMarker(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(0x000000, 0.2);
-  g.fillEllipse(0, 3, 58, 18);
-  g.fillStyle(0x44ff88, 0.28);
-  g.fillEllipse(0, -2, 48, 15);
-  g.lineStyle(2, 0x44ff88, 0.9);
-  g.strokeEllipse(0, -2, 50, 17);
-  g.fillStyle(0x44ff88, 0.95);
-  g.fillTriangle(-10, -12, 10, -2, -10, 8);
-  g.fillRect(-16, -5, 18, 6);
-  g.fillStyle(0xffffff, 0.65);
-  g.fillCircle(12, -8, 2);
-  g.fillCircle(18, -2, 2);
-  g.fillCircle(12, 4, 2);
-}
-
-interface PetalBloom {
-  station: InteractStation;
-  position: Position;
-}
-
-interface PendingPetalCollect {
-  position: Position;
-  amount: number;
-  requestedAt: number;
-}
-
-const PETAL_COLLECT_RADIUS_TILES = 2.75;
-const PETAL_AUTO_COLLECT_RADIUS_TILES = 1.35;
-const PETAL_AUTO_COLLECT_CHECK_MS = 32;
-// Backstop: if a collect request never gets a server reply (lost packet, server
-// restart, latency spike) drop the optimistic credit so the flower point can be
-// collected again instead of being blocked forever.
-const PETAL_PENDING_TIMEOUT_MS = 6000;
-// After any auto-collect attempt on a flower point, wait before auto-retrying it.
-// Without this, a server rollback (TOO_FAR / INVALID_PETAL at the edge of range)
-// re-adds the bloom and the 32ms auto-collect loop instantly re-grabs it, firing
-// collect attempts in a burst on the same flower.
-const PETAL_RETRY_COOLDOWN_MS = 1500;
-const PETAL_SPAWN_TICK_MS = 3000;
-const VOICE_MUTE_STORAGE_KEY = 'social-square:voice-muted-users';
-
 export class BarScene extends BaseRoomScene {
   private _network!: NetworkSystem;
   private _voice: VoiceSystem | null = null;
   private _remoteAvatars = new Map<string, RemoteAvatar>();
+  private _movingRemoteAvatars = new Set<string>();
   private _myUserId: string | null = null;
   private _stations: InteractStation[] = [];
   private _exitStations: InteractStation[] = [];
@@ -222,6 +96,8 @@ export class BarScene extends BaseRoomScene {
   private _voiceSpatialElapsed = 0;
   private _localContextElapsed = 0;
   private _petalCollectElapsed = 0;
+  private _jukeboxSpatialElapsed = 0;
+  private _jukeboxExpiryElapsed = 0;
   private _mutedVoiceUsers = new Set<string>();
   private _speakingVoiceUsers = new Set<string>();
   private _lastSpeakingUiKey = '';
@@ -245,7 +121,7 @@ export class BarScene extends BaseRoomScene {
   }
 
   protected override onLocalMove(x: number, y: number, moving: boolean): void {
-    this._network?.emitMove(x, y, Direction.SE, moving ? 'walk' : 'idle');
+    this._network?.emitMove(x, y, Direction.SE, moving ? 'walk' : 'idle', !moving);
   }
 
   protected override onLocalMoveCommand(_targetX: number, _targetY: number): void {
@@ -274,6 +150,13 @@ export class BarScene extends BaseRoomScene {
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+  protected override isLocalMovementLocked(): boolean {
+    const store = useGameStore.getState();
+    if (!store.showPoolOverlay) return false;
+    if (this._poolState.phase !== 'waiting' && this._poolState.phase !== 'playing') return false;
+    return this._poolState.players.some((player) => player.userId === this._myUserId);
+  }
 
   create(): void {
     super.create();
@@ -305,7 +188,18 @@ export class BarScene extends BaseRoomScene {
     eventBus.on('pool-join-duo', () => this._requestPoolStart('pool-join-duo'), this);
     eventBus.on('pool-shot', (shot: { angle: number; power: number; spin?: number }) => this._requestPoolShot(shot), this);
     eventBus.on('pool-sync', (payload: { balls: PoolBall[]; scratched: boolean }) => this._requestPoolSync(payload), this);
+    eventBus.on('pool-place-cue', (payload: { x: number; y: number }) => this._requestPoolPlaceCue(payload), this);
     eventBus.on('pool-leave', () => this._requestPoolLeave(), this);
+    eventBus.on('whisper-send', (payload: { toUserId: string; text: string }) => {
+      this._network?.emitWhisperMessage(payload.toUserId, payload.text);
+    }, this);
+    eventBus.on('private-room-join', (payload: { roomId: string; name: string }) => {
+      this._joinNetworkRoom(payload.roomId, payload.name);
+    }, this);
+    eventBus.on('avatar-updated', (avatarConfig: AvatarConfig) => {
+      this.localAvatar?.setAvatarConfig(avatarConfig);
+      this._network?.updateAvatar(avatarConfig);
+    }, this);
     useGameStore.getState().clearChatMessages();
 
     this._rebuildLocationStations();
@@ -334,7 +228,10 @@ export class BarScene extends BaseRoomScene {
 
   update(time: number, delta: number): void {
     super.update(time, delta);
-    this._remoteAvatars.forEach((avatar) => avatar.tick());
+    this._movingRemoteAvatars.forEach((userId) => {
+      const avatar = this._remoteAvatars.get(userId);
+      if (!avatar || !avatar.tick()) this._movingRemoteAvatars.delete(userId);
+    });
     this._waiterAvatar?.tick();
     this._updatePendingSeat();
     this._updatePendingExit();
@@ -345,10 +242,18 @@ export class BarScene extends BaseRoomScene {
       this._syncLocalContext();
     }
     this._syncVoiceSpatial(delta);
-    this._syncJukeboxSpatial();
-    this._syncJukeboxExpiry();
+    this._jukeboxSpatialElapsed += delta;
+    if (this._jukeboxSpatialElapsed >= 120) {
+      this._jukeboxSpatialElapsed = 0;
+      this._syncJukeboxSpatial();
+    }
+    this._jukeboxExpiryElapsed += delta;
+    if (this._jukeboxExpiryElapsed >= 500) {
+      this._jukeboxExpiryElapsed = 0;
+      this._syncJukeboxExpiry();
+    }
     this._petalCollectElapsed += delta;
-    if (this._petalCollectElapsed >= PETAL_AUTO_COLLECT_CHECK_MS) {
+    if (this._petalCollectElapsed >= petalMethods.PETAL_AUTO_COLLECT_CHECK_MS) {
       this._petalCollectElapsed = 0;
       this._sweepStalePetalCollects();
       this._collectNearbyPetals();
@@ -369,613 +274,185 @@ export class BarScene extends BaseRoomScene {
   // ── Interactive stations ────────────────────────────────────────────────────
 
   private _rebuildLocationStations(): void {
-    this._destroyLocationStations();
-    const locationId = this._currentLocationId();
-
-    if (locationId === '0,0') {
-      this._stations.push(new InteractStation({
-        scene: this, worldX: BAR_BEER_POSITION.x, worldY: BAR_BEER_POSITION.y,
-        label: `Spillatore - ${PETAL_ACTION_COST} petali`,
-        draw: drawBeerTap,
-        hitWidth: 26, hitHeight: 60,
-        depth: BarScene.COUNTER_FIXTURE_DEPTH,
-        ambientGlow: true,
-        onInteract: () => this._pickUpFromStation('beer', BAR_BEER_POSITION),
-      }));
-
-      this._stations.push(new InteractStation({
-        scene: this, worldX: BAR_PRETZEL_POSITION.x, worldY: BAR_PRETZEL_POSITION.y,
-        label: `Pretzel - ${PETAL_ACTION_COST} petali`,
-        draw: drawPretzelStand,
-        hitWidth: 30, hitHeight: 44,
-        depth: BarScene.COUNTER_FIXTURE_DEPTH,
-        ambientGlow: true,
-        onInteract: () => this._pickUpFromStation('pretzel', BAR_PRETZEL_POSITION),
-      }));
-
-      this._stations.push(new InteractStation({
-        scene: this, worldX: JUKEBOX_POSITION.x, worldY: JUKEBOX_POSITION.y,
-        label: 'Jukebox - click per cambiare brano',
-        draw: drawHotspot,
-        hitWidth: 54, hitHeight: 62,
-        onInteract: () => this._requestJukeboxNext(),
-      }));
-
-      this._stations.push(new InteractStation({
-        scene: this, worldX: POOL_POSITION.x, worldY: POOL_POSITION.y,
-        label: `Biliardo - ${POOL_PLAY_COST} petali`,
-        draw: drawHotspot,
-        hitWidth: 92, hitHeight: 58,
-        onInteract: () => this._requestPoolOpen(),
-      }));
-    }
-
-    for (const seat of SEAT_DEFINITIONS) {
-      if (locationIdForPosition(seat) !== locationId) continue;
-      this._stations.push(new InteractStation({
-        scene: this, worldX: seat.x, worldY: seat.y,
-        label: `${seat.label} - click per sederti`,
-        draw: drawHotspot,
-        hitWidth: seat.kind === 'bench' ? 72 : 58,
-        hitHeight: seat.kind === 'bench' ? 48 : 52,
-        onInteract: () => this._beginSeatInteraction(seat),
-      }));
-    }
+    stationMethods.rebuildLocationStations.call(this);
   }
 
   private _destroyLocationStations(): void {
-    this._stations.forEach((station) => station.destroy());
-    this._stations = [];
+    stationMethods.destroyLocationStations.call(this);
   }
 
   private _pickUpFromStation(item: HeldItem, position: Position): void {
-    if (!this._isNear(position)) {
-      this._showNotice('Avvicinati al bancone');
-      return;
-    }
-
-    this._network?.emitInteract(BAR_SERVICE_OBJECT_ID, 'pickup-item', { item });
+    stationMethods.pickUpFromStation.call(this, item, position);
   }
 
   private _pickUp(item: HeldItem): void {
-    if (!item) return;
-
-    this._sipsLeft = item === 'beer' ? BarScene.BEER_SIPS : BarScene.PRETZEL_BITES;
-    this.localAvatar.setHeldItem(item, 1);
-    useGameStore.getState().setHeldItem(item);
-    this._network.emitHoldItem(item);
+    stationMethods.pickUp.call(this, item);
   }
 
   private _consume(): void {
-    const item = this.localAvatar?.heldItem;
-    if (!item) return;
-
-    this.localAvatar.consume();
-    this._sipsLeft--;
-
-    if (this._sipsLeft <= 0) {
-      this.localAvatar.setHeldItem(null);
-      useGameStore.getState().setHeldItem(null);
-      this._network.emitHoldItem(null);
-    } else if (item === 'beer') {
-      this.localAvatar.setHeldItem('beer', this._sipsLeft / BarScene.BEER_SIPS);
-    }
+    stationMethods.consume.call(this);
   }
 
   // ── Network setup ─────────────────────────────────────────────────────────
 
   private _localPosition(): Position | null {
-    if (!this.localAvatar) return null;
-    return { x: this.movementSystem.posX, y: this.movementSystem.posY };
+    return stationMethods.localPosition.call(this);
   }
 
   private _waiterPosition(): Position {
-    return { x: this._waiterState.x, y: this._waiterState.y };
+    return waiterMethods.waiterPosition.call(this);
   }
 
   private _isNear(position: Position, radius = INTERACTION_RADIUS_TILES): boolean {
-    const local = this._localPosition();
-    return local ? isWithinInteractionRange(local, position, radius) : false;
+    return stationMethods.isNear.call(this, position, radius);
   }
 
   private _syncLocalContext(): void {
-    const local = this._localPosition();
-    if (!local) return;
-
-    const locationInfo = locationForPosition(local);
-    const location = locationInfo.name;
-    const inBarInterior = locationInfo.id === '0,0';
-    const nearJukebox = inBarInterior && this._isNear(JUKEBOX_POSITION);
-    const nearWaiter = inBarInterior && this._isNear(this._waiterPosition());
-    const nearPool = inBarInterior && this._isNear(POOL_POSITION);
-    const store = useGameStore.getState();
-    const canAffordAction = store.petals >= PETAL_ACTION_COST;
-    const canAffordPool = store.petals >= POOL_PLAY_COST;
-    const nearbyExit = this._nearestExit(local);
-    const routeHint = nearbyExit ? `Verso ${targetName(nearbyExit)}` : null;
-    const key = `${location}|${nearJukebox ? 1 : 0}|${nearWaiter ? 1 : 0}|${nearPool ? 1 : 0}|${canAffordAction ? 1 : 0}|${canAffordPool ? 1 : 0}|${routeHint ?? ''}`;
-    if (key === this._lastLocalContextKey) return;
-
-    this._lastLocalContextKey = key;
-    store.setLocationName(location);
-    store.setRouteHint(routeHint);
-    store.setActionAvailability({ nearJukebox, nearWaiter, nearPool, canAffordAction, canAffordPool });
+    stationMethods.syncLocalContext.call(this);
   }
 
   private _startPetalSpawns(): void {
-    this.time.delayedCall(1200, () => this._seedPetalBloomsForLocation());
-
-    this._petalSpawnTimer = this.time.addEvent({
-      delay: PETAL_SPAWN_TICK_MS,
-      loop: true,
-      callback: () => this._maybeSpawnPetalBloom(),
-    });
+    petalMethods.startPetalSpawns.call(this);
   }
 
   private _seedPetalBloomsForLocation(): void {
-    const config = petalSpawnConfigForLocation(this._currentLocationId());
-    if (!config) return;
-    for (let i = 0; i < config.initialActive; i++) this._spawnPetalBloom();
-    this._lastPetalSpawnByLocation.set(config.locationId, Date.now());
+    petalMethods.seedPetalBloomsForLocation.call(this);
   }
 
   private _maybeSpawnPetalBloom(): void {
-    const locationId = this._currentLocationId();
-    const config = petalSpawnConfigForLocation(locationId);
-    if (!config) return;
-    const last = this._lastPetalSpawnByLocation.get(locationId) ?? 0;
-    if (Date.now() - last < config.intervalMs) return;
-    if (this._spawnPetalBloom()) this._lastPetalSpawnByLocation.set(locationId, Date.now());
+    petalMethods.maybeSpawnPetalBloom.call(this);
   }
 
   private _spawnPetalBloom(): boolean {
-    const config = petalSpawnConfigForLocation(this._currentLocationId());
-    if (!config) return false;
-    if (this._petalBlooms.length >= config.maxActive) return false;
-
-    const available = config.points.filter((point) => {
-      const occupied = this._petalBlooms.some((bloom) => (
-        Math.round(bloom.position.x) === Math.round(point.x) &&
-        Math.round(bloom.position.y) === Math.round(point.y)
-      ));
-      if (occupied) return false;
-      const tile = this.worldMap.getTile(Math.round(point.x), Math.round(point.y));
-      return tile?.walkable === true;
-    });
-    if (available.length === 0) return false;
-
-    const index = Phaser.Math.Between(0, available.length - 1);
-    const position = { ...available[index] };
-    const bloom = this._createPetalBloom(position, config.value);
-    this._petalBlooms.push(bloom);
-    return true;
+    return petalMethods.spawnPetalBloom.call(this);
   }
 
   private _createPetalBloom(position: Position, amount: number): PetalBloom {
-    let bloom: PetalBloom;
-    const station = new InteractStation({
-      scene: this,
-      worldX: position.x,
-      worldY: position.y,
-      label: `Petali +${amount}`,
-      draw: drawPetalBloom,
-      hitWidth: 38,
-      hitHeight: 42,
-      ambientGlow: true,
-      onInteract: () => this._collectPetalBloom(bloom),
-    });
-
-    bloom = { station, position };
-    return bloom;
+    return petalMethods.createPetalBloom.call(this, position, amount);
   }
 
   private _sweepStalePetalCollects(): void {
-    if (this._pendingPetalCollects.size === 0) return;
-    const now = Date.now();
-    for (const [key, pending] of this._pendingPetalCollects) {
-      if (now - pending.requestedAt >= PETAL_PENDING_TIMEOUT_MS) {
-        this._pendingPetalCollects.delete(key);
-        this._removeOptimisticPetalCredit(pending);
-      }
-    }
+    petalMethods.sweepStalePetalCollects.call(this);
   }
 
   private _collectNearbyPetals(): void {
-    const local = this._localPosition();
-    if (!local || this._petalBlooms.length === 0) return;
-
-    const now = Date.now();
-    for (const bloom of [...this._petalBlooms]) {
-      const key = petalPointKey(bloom.position);
-      if (this._pendingPetalCollects.has(key)) continue;
-      if (now < (this._petalAttemptCooldowns.get(key) ?? 0)) continue;
-      if (isWithinInteractionRange(local, bloom.position, PETAL_AUTO_COLLECT_RADIUS_TILES)) {
-        this._collectPetalBloom(bloom, true);
-      }
-    }
+    petalMethods.collectNearbyPetals.call(this);
   }
 
   private _collectPetalBloom(bloom: PetalBloom, automatic = false): void {
-    if (!automatic && !this._isNear(bloom.position, PETAL_COLLECT_RADIUS_TILES)) {
-      this._showNotice('Avvicinati ai petali');
-      return;
-    }
-
-    const key = petalPointKey(bloom.position);
-    if (this._pendingPetalCollects.has(key)) return;
-    const config = petalSpawnConfigForLocation(this._currentLocationId());
-    const amount = config?.value ?? 0;
-    this._pendingPetalCollects.set(key, {
-      position: { ...bloom.position },
-      amount,
-      requestedAt: Date.now(),
-    });
-    this._removePetalBloom(bloom);
-    if (amount > 0) {
-      useGameStore.getState().setPetals(useGameStore.getState().petals + amount);
-      this._spawnPetalCollectBurst(bloom.position, amount);
-      this._playPetalCollectSound();
-    }
-    this._petalAttemptCooldowns.set(key, Date.now() + PETAL_RETRY_COOLDOWN_MS);
-    this._syncPetalPositionForServer();
-    this._network?.emitInteract(PETAL_BLOOM_OBJECT_ID, 'petal-collect', {
-      x: bloom.position.x,
-      y: bloom.position.y,
-      requestId: key,
-    });
+    petalMethods.collectPetalBloom.call(this, bloom, automatic);
   }
 
   private _confirmPetalCollected(position: Position, amount: number, petals: number, requestId?: string): void {
-    const key = requestId ?? petalPointKey(position);
-    const pending = this._pendingPetalCollects.get(key);
-    const bloom = this._petalBlooms.find((candidate) => petalPointKey(candidate.position) === key);
-    this._pendingPetalCollects.delete(key);
-    this._petalAttemptCooldowns.delete(key);
-    if (bloom) this._removePetalBloom(bloom);
-    if (!pending) {
-      this._spawnPetalCollectBurst(position, amount);
-      this._playPetalCollectSound();
-    }
-    this._applyServerPetals(petals);
-    this._showNotice(`+${amount} petali`);
-    this._syncLocalContext();
+    petalMethods.confirmPetalCollected.call(this, position, amount, petals, requestId);
   }
 
   private _removePetalBloom(bloom: PetalBloom): void {
-    this._petalBlooms = this._petalBlooms.filter((candidate) => candidate !== bloom);
-    bloom.station.destroy();
+    petalMethods.removePetalBloom.call(this, bloom);
   }
 
   private _syncPetalPositionForServer(): void {
-    const local = this._localPosition();
-    if (!local) return;
-    this._network?.emitMove(local.x, local.y, Direction.SE, this.movementSystem.isMoving ? 'walk' : 'idle', true);
+    petalMethods.syncPetalPositionForServer.call(this);
   }
 
   private _rollbackPendingPetalCollect(requestId: string | undefined, message: string): void {
-    if (!requestId) return;
-    const pending = this._pendingPetalCollects.get(requestId);
-    if (!pending) return;
-    this._pendingPetalCollects.delete(requestId);
-    this._removeOptimisticPetalCredit(pending);
-    const config = petalSpawnConfigForLocation(this._currentLocationId());
-    const isValidLocationPoint = Boolean(config?.points.some((point) => petalPointKey(point) === petalPointKey(pending.position)));
-    const alreadyVisible = this._petalBlooms.some((bloom) => petalPointKey(bloom.position) === petalPointKey(pending.position));
-    if (config && isValidLocationPoint && !alreadyVisible) {
-      this._petalBlooms.push(this._createPetalBloom({ ...pending.position }, config.value));
-    }
-    this._showNotice(message);
+    petalMethods.rollbackPendingPetalCollect.call(this, requestId, message);
   }
 
   private _rollbackLatestPendingPetalCollect(message: string): void {
-    const requestIds = Array.from(this._pendingPetalCollects.keys());
-    const latestRequestId = requestIds[requestIds.length - 1];
-    this._rollbackPendingPetalCollect(latestRequestId, message);
+    petalMethods.rollbackLatestPendingPetalCollect.call(this, message);
   }
 
   private _forgetLatestPendingPetalCollect(): void {
-    const requestIds = Array.from(this._pendingPetalCollects.keys());
-    const latestRequestId = requestIds[requestIds.length - 1];
-    if (latestRequestId) this._forgetPendingPetalCollect(latestRequestId);
+    petalMethods.forgetLatestPendingPetalCollect.call(this);
   }
 
   private _forgetPendingPetalCollect(requestId: string): void {
-    const pending = this._pendingPetalCollects.get(requestId);
-    this._pendingPetalCollects.delete(requestId);
-    if (pending) this._removeOptimisticPetalCredit(pending);
+    petalMethods.forgetPendingPetalCollect.call(this, requestId);
   }
 
   private _removeOptimisticPetalCredit(pending: PendingPetalCollect): void {
-    if (pending.amount <= 0) return;
-    useGameStore.getState().setPetals(useGameStore.getState().petals - pending.amount);
+    petalMethods.removeOptimisticPetalCredit.call(this, pending);
   }
 
   private _applyServerPetals(petals: number): void {
-    useGameStore.getState().setPetals(petals + this._pendingPetalValue());
+    petalMethods.applyServerPetals.call(this, petals);
   }
 
   private _pendingPetalValue(): number {
-    let total = 0;
-    this._pendingPetalCollects.forEach((pending) => {
-      total += pending.amount;
-    });
-    return total;
+    return petalMethods.pendingPetalValue.call(this);
   }
 
   private _spawnPetalCollectBurst(position: Position, amount: number): void {
-    const iso = IsometricSystem.worldToIso(position.x, position.y);
-    const colors = [0xffd166, 0xe85d75, 0x9b7cff, 0xffffff, 0x88ffbb];
-
-    for (let i = 0; i < 10; i++) {
-      const petal = this.add.graphics({ x: iso.x, y: iso.y - 22 });
-      petal.fillStyle(colors[i % colors.length], 1);
-      petal.fillEllipse(0, 0, 8, 4);
-      petal.setDepth(IsometricSystem.depth(position.x, position.y) + 8);
-      petal.setRotation((Math.PI * 2 * i) / 10);
-
-      const angle = (Math.PI * 2 * i) / 10;
-      const distance = 24 + (i % 3) * 8;
-      this.tweens.add({
-        targets: petal,
-        x: iso.x + Math.cos(angle) * distance,
-        y: iso.y - 52 + Math.sin(angle) * 12,
-        alpha: 0,
-        scale: 0.45,
-        duration: 520,
-        ease: 'Cubic.easeOut',
-        onComplete: () => petal.destroy(),
-      });
-    }
-
-    const text = this.add.text(iso.x, iso.y - 46, `+${amount}`, {
-      fontSize: '18px',
-      color: '#fff4d0',
-      fontFamily: 'monospace',
-      fontStyle: 'bold',
-      stroke: '#1a1206',
-      strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(IsometricSystem.depth(position.x, position.y) + 9);
-
-    this.tweens.add({
-      targets: text,
-      y: iso.y - 86,
-      alpha: 0,
-      scale: 1.18,
-      duration: 720,
-      ease: 'Quad.easeOut',
-      onComplete: () => text.destroy(),
-    });
+    petalMethods.spawnPetalCollectBurst.call(this, position, amount);
   }
 
   private _playPetalCollectSound(): void {
-    const context = this._getPetalAudioContext();
-    if (!context) return;
-
-    void context.resume();
-
-    const now = context.currentTime;
-    const master = context.createGain();
-    master.gain.setValueAtTime(0.0001, now);
-    master.gain.exponentialRampToValueAtTime(0.16, now + 0.018);
-    master.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
-    master.connect(context.destination);
-
-    for (const [index, frequency] of [660, 920, 1180].entries()) {
-      const oscillator = context.createOscillator();
-      oscillator.type = index === 0 ? 'triangle' : 'sine';
-      oscillator.frequency.setValueAtTime(frequency, now + index * 0.045);
-      oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.18, now + 0.2 + index * 0.03);
-      oscillator.connect(master);
-      oscillator.start(now + index * 0.045);
-      oscillator.stop(now + 0.36 + index * 0.035);
-    }
-
-    navigator.vibrate?.(18);
+    petalMethods.playPetalCollectSound.call(this);
   }
 
   private _primePetalAudio(): void {
-    const context = this._getPetalAudioContext();
-    if (context) void context.resume();
+    petalMethods.primePetalAudio.call(this);
   }
 
   private _getPetalAudioContext(): AudioContext | null {
-    const win = window as Window & {
-      webkitAudioContext?: typeof AudioContext;
-      __socialSquarePetalAudioContext?: AudioContext;
-    };
-    const AudioContextCtor = window.AudioContext ?? win.webkitAudioContext;
-    if (!AudioContextCtor) return null;
-
-    const context = win.__socialSquarePetalAudioContext ?? new AudioContextCtor();
-    win.__socialSquarePetalAudioContext = context;
-    return context;
+    return petalMethods.getPetalAudioContext();
   }
 
   private _currentLocationId(): LocationId | string {
-    const local = this._localPosition();
-    return local ? locationIdForPosition(local) : '0,0';
+    return locationMethods.currentLocationId.call(this);
   }
 
   private _rebuildExitStations(): void {
-    this._exitStations.forEach((station) => station.destroy());
-    this._exitStations = [];
-
-    for (const exit of exitsForLocation(this._currentLocationId())) {
-      this._exitStations.push(new InteractStation({
-        scene: this,
-        worldX: exit.trigger.x,
-        worldY: exit.trigger.y,
-        label: `Verso ${targetName(exit)}`,
-        draw: drawExitMarker,
-        hitWidth: 62,
-        hitHeight: 38,
-        ambientGlow: true,
-        onInteract: () => this._beginExitTravel(exit),
-      }));
-    }
+    locationMethods.rebuildExitStations.call(this);
   }
 
   private _nearestExit(position: Position, radius = 4.25): LocationExit | null {
-    let best: { exit: LocationExit; distance: number } | null = null;
-    for (const exit of exitsForLocation(locationIdForPosition(position))) {
-      const dx = exit.trigger.x - position.x;
-      const dy = exit.trigger.y - position.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      if (distance > radius) continue;
-      if (!best || distance < best.distance) best = { exit, distance };
-    }
-    return best?.exit ?? null;
+    return locationMethods.nearestExit.call(this, position, radius);
   }
 
   private _beginExitTravel(exit: LocationExit): void {
-    if (Date.now() - this._lastTravelAt < 500) return;
-    this._pendingExit = exit;
-    const local = this._localPosition();
-    if (local && isWithinInteractionRange(local, exit.trigger, 0.18)) {
-      void this._enterLocation(exit.targetId, exit.arrival);
-      return;
-    }
-
-    const started = this.movementSystem.moveTo(exit.trigger.x, exit.trigger.y);
-    this.setLocalAvatarState(null);
-    if (!started) {
-      this._pendingExit = null;
-      this._showNotice(`Non riesco a raggiungere ${targetName(exit)}`);
-    }
+    locationMethods.beginExitTravel.call(this, exit);
   }
 
   private _updatePendingExit(): void {
-    if (!this._pendingExit || this.movementSystem.isMoving) return;
-    const exit = this._pendingExit;
-    const local = this._localPosition();
-    if (!local || !isWithinInteractionRange(local, exit.trigger, 0.22)) return;
-    void this._enterLocation(exit.targetId, exit.arrival);
+    locationMethods.updatePendingExit.call(this);
   }
 
   private _checkExitTileTravel(): void {
-    if (this._pendingExit || this.movementSystem.isMoving || Date.now() - this._lastTravelAt < 650) return;
-    const local = this._localPosition();
-    if (!local) return;
-    const exit = exitsForLocation(locationIdForPosition(local)).find((candidate) => (
-      isWithinInteractionRange(local, candidate.trigger, 0.22)
-    ));
-    if (exit) void this._enterLocation(exit.targetId, exit.arrival);
+    locationMethods.checkExitTileTravel.call(this);
   }
 
   private _fastTravel(locationId: LocationId): void {
-    const location = locationForId(locationId);
-    if (!location) return;
-    void this._enterLocation(location.id, location.spawn);
+    locationMethods.fastTravel.call(this, locationId);
   }
 
   private async _enterLocation(locationId: LocationId, position: Position): Promise<void> {
-    const location = locationForId(locationId);
-    if (!location) return;
-
-    this._pendingExit = null;
-    this._lastTravelAt = Date.now();
-    this._leaveSeat(true);
-    this.movementSystem.stopMovement();
-    this.setLocalAvatarTile(position.x, position.y, null);
-    this._network?.emitMove(position.x, position.y, Direction.SE, 'idle', true);
-    this._destroyAllRemotes();
-    this._clearPetalBlooms();
-    this._destroyLocationStations();
-    this._lastLocalContextKey = '';
-    const store = useGameStore.getState();
-    store.setLocationName(location.name);
-    store.setRouteHint(null);
-    store.setTravelTargetName(location.name);
-    this._showNotice(location.name);
-
-    try {
-      await this.refreshWorldAt(position.x, position.y);
-    } finally {
-      useGameStore.getState().setTravelTargetName(null);
-    }
-    this._rebuildLocationStations();
-    this._rebuildExitStations();
-    this._seedPetalBloomsForLocation();
-    this._applyWaiterState(this._waiterState);
-    this._syncJukeboxForLocation();
-    this._applyPoolState(this._poolState);
-    this._syncLocalContext();
-    void this._connectVoiceForCurrentLocation();
+    await locationMethods.enterLocation.call(this, locationId, position);
   }
 
   private _destroyAllRemotes(): void {
-    this._remoteAvatars.forEach((avatar, userId) => {
-      this.isoSystem.unregister(avatar);
-      avatar.destroy();
-      this._voice?.setParticipantSpatial(userId, { volume: 0, pan: 0 });
-    });
-    this._remoteAvatars.clear();
-    this._speakingVoiceUsers.clear();
-    this._setSpeakingUi([]);
-    useGameStore.getState().setUserActionMenu(null);
+    remoteMethods.destroyAllRemotes.call(this);
   }
 
   private _clearPetalBlooms(): void {
-    this._petalBlooms.forEach((bloom) => bloom.station.destroy());
-    this._petalBlooms = [];
-    this._pendingPetalCollects.clear();
-    this._petalAttemptCooldowns.clear();
+    petalMethods.clearPetalBlooms.call(this);
   }
 
   private _beginSeatInteraction(seat: SeatDefinition): void {
-    const occupant = this._seatOccupants.get(seat.id);
-    if (occupant && occupant !== this._myUserId) {
-      this._showNotice('Seduta occupata');
-      return;
-    }
-
-    if (this._seatedSeatId === seat.id) {
-      this._leaveSeat(true);
-      return;
-    }
-
-    this._leaveSeat(true);
-    this._pendingSeat = seat;
-
-    if (!this.worldMap.isWalkable(seat.x, seat.y)) {
-      this._pendingSeat = null;
-      this._showNotice('Non riesco a raggiungere la seduta');
-      return;
-    }
-
-    const started = this.movementSystem.moveTo(seat.x, seat.y);
-    this.setLocalAvatarState(null);
-    if (!started) this._requestSit(seat);
+    seatMethods.beginSeatInteraction.call(this, seat);
   }
 
   private _updatePendingSeat(): void {
-    if (!this._pendingSeat || this.movementSystem.isMoving) return;
-    const seat = this._pendingSeat;
-    const dx = this.movementSystem.posX - seat.x;
-    const dy = this.movementSystem.posY - seat.y;
-    if (Math.sqrt(dx * dx + dy * dy) > 0.08) return;
-
-    this._pendingSeat = null;
-    this._requestSit(seat);
+    seatMethods.updatePendingSeat.call(this);
   }
 
   private _requestSit(seat: SeatDefinition): void {
-    this._network?.emitInteract(seat.id, 'seat-sit', { x: seat.x, y: seat.y });
-    this._applySeatState(seat.id, { kind: 'seat', occupiedBy: this._myUserId, x: seat.x, y: seat.y });
+    seatMethods.requestSit.call(this, seat);
   }
 
   private _leaveSeat(emit: boolean): void {
-    if (!this._seatedSeatId) return;
-    const seatId = this._seatedSeatId;
-    this._seatedSeatId = null;
-    this.setLocalAvatarState(null);
-
-    if (emit) {
-      this._network?.emitInteract(seatId, 'seat-leave', {
-        x: Math.round(this.movementSystem.posX),
-        y: Math.round(this.movementSystem.posY),
-      });
-    }
+    seatMethods.leaveSeat.call(this, emit);
   }
 
   private _triggerEmote(emoteId: EmoteId): void {
@@ -997,316 +474,99 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _callWaiter(): void {
-    if (!this.localAvatar) return;
-    if (!this._isInWaiterLocation()) {
-      this._showNotice('Cameriere disponibile al bar');
-      return;
-    }
-    if (!this._isNear(this._waiterPosition())) {
-      this._showNotice('Avvicinati al cameriere');
-      return;
-    }
-
-    this._network?.emitInteract(WAITER_OBJECT_ID, 'waiter-call', {
-      x: Math.round(this.movementSystem.posX),
-      y: Math.round(this.movementSystem.posY),
-    });
+    waiterMethods.callWaiter.call(this);
   }
 
   private _placeWaiterOrder(item: OrderItemId): void {
-    if (!this._isInWaiterLocation()) {
-      this._showNotice('Ordini disponibili al bar');
-      return;
-    }
-    if (!this._isNear(this._waiterPosition())) {
-      this._showNotice('Avvicinati al cameriere');
-      return;
-    }
-
-    this._network?.emitInteract(WAITER_OBJECT_ID, 'waiter-order', {
-      item,
-      x: Math.round(this.movementSystem.posX),
-      y: Math.round(this.movementSystem.posY),
-    });
+    waiterMethods.placeWaiterOrder.call(this, item);
   }
 
   private _ensureWaiterAvatar(waiter: WaiterState): RemoteAvatar {
-    if (this._waiterAvatar) return this._waiterAvatar;
-
-    const avatar = new RemoteAvatar({
-      scene: this,
-      username: 'Cameriere',
-      worldX: waiter.x,
-      worldY: waiter.y,
-    });
-    this._waiterAvatar = avatar;
-    this.isoSystem.register(avatar, waiter.x, waiter.y);
-    return avatar;
+    return waiterMethods.ensureWaiterAvatar.call(this, waiter);
   }
 
   private _destroyWaiterAvatar(): void {
-    if (!this._waiterAvatar) return;
-    this.isoSystem.unregister(this._waiterAvatar);
-    this._waiterAvatar.destroy();
-    this._waiterAvatar = null;
+    waiterMethods.destroyWaiterAvatar.call(this);
   }
 
   private _applyWaiterState(rawState: unknown): void {
-    const waiter = normalizeWaiterState(rawState);
-    this._waiterState = waiter;
-
-    if (!this._isInWaiterLocation()) {
-      this._destroyWaiterAvatar();
-      useGameStore.getState().setWaiterStatus(null);
-      return;
-    }
-
-    useGameStore.getState().setWaiterStatus(waiter);
-
-    const avatar = this._ensureWaiterAvatar(waiter);
-    const moving = waiter.phase === 'approaching' ||
-      waiter.phase === 'to-counter' ||
-      waiter.phase === 'delivering' ||
-      waiter.phase === 'returning';
-    avatar.updateTarget(waiter.x, waiter.y, Direction.SE, moving ? 'walk' : 'idle');
-    avatar.setHeldItem(waiter.phase === 'delivering' || waiter.phase === 'delivered'
-      ? waiter.item ?? null
-      : null);
-
-    if (
-      waiter.phase === 'delivered' &&
-      waiter.customerId === this._myUserId &&
-      waiter.orderId &&
-      waiter.item &&
-      !this._deliveredOrderIds.has(waiter.orderId)
-    ) {
-      this._deliveredOrderIds.add(waiter.orderId);
-      this._pickUp(waiter.item);
-      this._showNotice(`${waiter.item === 'beer' ? 'Birra' : 'Pretzel'} consegnato`);
-    }
+    waiterMethods.applyWaiterState.call(this, rawState);
   }
 
   private _isInWaiterLocation(): boolean {
-    return this._currentLocationId() === '0,0';
+    return waiterMethods.isInWaiterLocation.call(this);
   }
 
   private _requestJukeboxToggle(): void {
-    if (!this._isInJukeboxLocation()) {
-      this._showNotice('Jukebox disponibile al bar');
-      return;
-    }
-    if (!this._isNear(JUKEBOX_POSITION)) {
-      this._showNotice('Avvicinati al jukebox');
-      return;
-    }
-
-    if (this._jukeboxState.playing) {
-      this._showNotice('Jukebox in corso');
-      return;
-    }
-
-    if (useGameStore.getState().petals < JUKEBOX_PLAY_COST) {
-      this._showNotice(`Servono ${JUKEBOX_PLAY_COST} petali`);
-      return;
-    }
-
-    this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-toggle');
+    jukeboxMethods.requestJukeboxToggle.call(this);
   }
 
   private _requestJukeboxNext(): void {
-    if (!this._isInJukeboxLocation()) {
-      this._showNotice('Jukebox disponibile al bar');
-      return;
-    }
-    if (!this._isNear(JUKEBOX_POSITION)) {
-      this._showNotice('Avvicinati al jukebox');
-      return;
-    }
-
-    if (this._jukeboxState.playing) {
-      this._showNotice('Jukebox in corso');
-      return;
-    }
-
-    if (useGameStore.getState().petals < JUKEBOX_PLAY_COST) {
-      this._showNotice(`Servono ${JUKEBOX_PLAY_COST} petali`);
-      return;
-    }
-
-    this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-next');
+    jukeboxMethods.requestJukeboxNext.call(this);
   }
 
   private _requestJukeboxPlayUrl(url: string): void {
-    if (!this._isInJukeboxLocation()) {
-      this._showNotice('Jukebox disponibile al bar');
-      return;
-    }
-    if (!this._isNear(JUKEBOX_POSITION)) {
-      this._showNotice('Avvicinati al jukebox');
-      return;
-    }
-
-    const externalTrack = parseJukeboxExternalTrack(url);
-    if (!externalTrack) {
-      this._showNotice('Link YouTube non valido');
-      return;
-    }
-
-    if (this._jukeboxState.playing) {
-      this._showNotice('Jukebox in corso');
-      return;
-    }
-
-    if (useGameStore.getState().petals < JUKEBOX_PLAY_COST) {
-      this._showNotice(`Servono ${JUKEBOX_PLAY_COST} petali`);
-      return;
-    }
-
-    this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-play-url', { url });
+    jukeboxMethods.requestJukeboxPlayUrl.call(this, url);
   }
 
   private async _applyJukeboxState(rawState: unknown): Promise<void> {
-    const state = normalizeJukeboxState(rawState);
-    this._jukeboxState = state;
-    if (!this._isInJukeboxLocation()) {
-      await this._jukebox.applyState({ ...state, playing: false });
-      useGameStore.getState().setJukeboxStatus(null);
-      return;
-    }
-
-    const result = await this._jukebox.applyState(state);
-    useGameStore.getState().setJukeboxStatus({
-      trackId: state.trackId,
-      title: state.externalTrack?.title ?? jukeboxTitle(state.trackId),
-      playing: state.playing,
-      blocked: result.blocked,
-      source: state.externalTrack?.provider ?? 'local',
-      expiresAt: state.expiresAt,
-      externalUrl: state.externalTrack?.url,
-      requestedBy: state.requestedBy,
-      history: state.history,
-    });
-    this._syncJukeboxSpatial();
-    if (result.blocked) this._showNotice('Clicca Play nel player del jukebox');
+    await jukeboxMethods.applyJukeboxState.call(this, rawState);
   }
 
   private _isInJukeboxLocation(): boolean {
-    return this._currentLocationId() === '0,0';
+    return jukeboxMethods.isInJukeboxLocation.call(this);
   }
 
   private _requestPoolOpen(): void {
-    if (!this._isInPoolLocation()) {
-      this._showPoolMessage('Biliardo disponibile al bar', 'error');
-      return;
-    }
-    if (!this._isNear(POOL_POSITION)) {
-      this._showPoolMessage('Avvicinati al biliardo', 'error');
-      return;
-    }
-    const store = useGameStore.getState();
-    store.setPoolMessage(null);
-    store.setShowPoolOverlay(true);
+    poolMethods.requestPoolOpen.call(this);
   }
 
   private _requestPoolStart(action: 'pool-start-solo' | 'pool-create-duo' | 'pool-join-duo'): void {
-    if (!this._isInPoolLocation()) {
-      this._showPoolMessage('Biliardo disponibile al bar', 'error');
-      return;
-    }
-    if (!this._isNear(POOL_POSITION)) {
-      this._showPoolMessage('Avvicinati al biliardo', 'error');
-      return;
-    }
-    const store = useGameStore.getState();
-    if (store.petals < POOL_PLAY_COST) {
-      this._showPoolMessage(`Servono ${POOL_PLAY_COST} petali`, 'error');
-      return;
-    }
-    store.setPoolMessage({ text: 'Richiesta inviata al tavolo...', tone: 'info' });
-    this._syncPoolPositionForServer();
-    this._network?.emitInteract(POOL_OBJECT_ID, action);
+    poolMethods.requestPoolStart.call(this, action);
   }
 
   private _requestPoolShot(shot: { angle: number; power: number; spin?: number }): void {
-    this._network?.emitInteract(POOL_OBJECT_ID, 'pool-shot', {
-      angle: shot.angle,
-      power: shot.power,
-      spin: shot.spin ?? 0,
-    });
+    poolMethods.requestPoolShot.call(this, shot);
   }
 
   private _requestPoolSync(payload: { balls: PoolBall[]; scratched: boolean }): void {
-    this._network?.emitInteract(POOL_OBJECT_ID, 'pool-sync', {
-      balls: serializePoolBalls(payload.balls),
-      scratched: payload.scratched,
-    });
+    poolMethods.requestPoolSync.call(this, payload);
+  }
+
+  private _requestPoolPlaceCue(payload: { x: number; y: number }): void {
+    poolMethods.requestPoolPlaceCue.call(this, payload);
   }
 
   private _requestPoolLeave(): void {
-    this._network?.emitInteract(POOL_OBJECT_ID, 'pool-leave');
-    const store = useGameStore.getState();
-    store.setPoolMessage(null);
-    store.setShowPoolOverlay(false);
+    poolMethods.requestPoolLeave.call(this);
   }
 
   private _applyPoolState(rawState: unknown): void {
-    const state = normalizePoolState(rawState);
-    this._poolState = state;
-    const store = useGameStore.getState();
-    if (!this._isInPoolLocation()) {
-      store.setPoolStatus(null);
-      store.setShowPoolOverlay(false);
-      store.setPoolMessage(null);
-      return;
-    }
-    store.setPoolStatus(state);
-    if (state.players.some((player) => player.userId === this._myUserId) && state.phase !== 'idle') {
-      store.setShowPoolOverlay(true);
-      if (!store.poolMessage || store.poolMessage.text === 'Richiesta inviata al tavolo...') {
-        store.setPoolMessage({
-          text: state.phase === 'waiting' ? 'Stanza creata. In attesa del secondo giocatore.' : 'Partita avviata.',
-          tone: 'info',
-        });
-      }
-    }
+    poolMethods.applyPoolState.call(this, rawState);
   }
 
   private _isInPoolLocation(): boolean {
-    return this._currentLocationId() === '0,0';
+    return poolMethods.isInPoolLocation.call(this);
   }
 
   private _showPoolMessage(message: string, tone: 'info' | 'error'): void {
-    useGameStore.getState().setPoolMessage({ text: message, tone });
-    this._showNotice(message);
+    poolMethods.showPoolMessage.call(this, message, tone);
   }
 
   private _syncPoolPositionForServer(): void {
-    const local = this._localPosition();
-    if (!local) return;
-    this._network?.emitMove(local.x, local.y, Direction.SE, 'idle', true);
+    poolMethods.syncPoolPositionForServer.call(this);
   }
 
   private _syncJukeboxForLocation(): void {
-    if (this._isInJukeboxLocation()) return;
-    this._jukebox.setSpatial(0, 0);
-    void this._jukebox.applyState({ ...this._jukeboxState, playing: false });
-    useGameStore.getState().setJukeboxStatus(null);
+    jukeboxMethods.syncJukeboxForLocation.call(this);
   }
 
   private _syncJukeboxSpatial(): void {
-    if (!this._jukeboxState.playing || !this._isInJukeboxLocation()) return;
-    const local = this._localPosition();
-    if (!local) return;
-    const spatial = this._spatialFrom(local, JUKEBOX_POSITION, 11, 0.08);
-    this._jukebox.setSpatial(spatial.volume, spatial.pan);
+    jukeboxMethods.syncJukeboxSpatial.call(this);
   }
 
   private _syncJukeboxExpiry(): void {
-    if (!this._jukeboxState.playing) return;
-    const normalized = normalizeJukeboxState(this._jukeboxState);
-    if (normalized.playing) return;
-    this._jukeboxState = normalized;
-    void this._applyJukeboxState(normalized);
+    jukeboxMethods.syncJukeboxExpiry.call(this);
   }
 
   private _applyObjectState(objectId: string, objectState: ObjectState): void {
@@ -1326,268 +586,55 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _applySeatState(objectId: string, objectState: ObjectState): void {
-    const occupiedBy = typeof objectState.occupiedBy === 'string' ? objectState.occupiedBy : null;
-    const x = typeof objectState.x === 'number' ? objectState.x : null;
-    const y = typeof objectState.y === 'number' ? objectState.y : null;
-
-    if (occupiedBy) {
-      this._seatOccupants.set(objectId, occupiedBy);
-    } else {
-      this._seatOccupants.delete(objectId);
-    }
-
-    if (occupiedBy === this._myUserId && x !== null && y !== null) {
-      if (locationIdForPosition({ x, y }) !== this._currentLocationId()) return;
-      this._seatedSeatId = objectId;
-      this._pendingSeat = null;
-      this.setLocalAvatarTile(x, y, 'sit');
-      return;
-    }
-
-    if (this._seatedSeatId === objectId && occupiedBy !== this._myUserId) {
-      this._seatedSeatId = null;
-      this.setLocalAvatarState(null);
-    }
+    seatMethods.applySeatState.call(this, objectId, objectState);
   }
 
   private _showNotice(message: string): void {
-    if (!this._noticeText) {
-      this._noticeText = this.add.text(this.scale.width / 2, 62, message, {
-        fontSize: '12px',
-        color: '#fff4d0',
-        fontFamily: 'monospace',
-        backgroundColor: '#1a1206dd',
-        padding: { x: 10, y: 5 },
-      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1001);
-    }
-
-    this._noticeText.setText(message).setAlpha(1).setVisible(true);
-    this._noticeText.setX(this.scale.width / 2);
-    this.tweens.add({
-      targets: this._noticeText,
-      alpha: 0,
-      delay: 1400,
-      duration: 450,
-      ease: 'Quad.easeOut',
-      onComplete: () => this._noticeText?.setVisible(false),
-    });
+    stationMethods.showNotice.call(this, message);
   }
 
   private _setupNetwork(): void {
-    const { username = 'Player', token } = useUserStore.getState();
+    networkMethods.setupNetwork.call(this);
+  }
 
-    this._network = new NetworkSystem();
-    this._network.setCallbacks({
-      onConnect: (socketId) => {
-        // With JWT, userId comes from the token; without JWT, use socket id
-        const store = useUserStore.getState();
-        this._myUserId = store.userId ?? socketId;
-        if (!store.userId) useUserStore.getState().setUser(socketId, username ?? 'Player');
-        useGameStore.getState().setConnected(true);
-        useGameStore.getState().setRoomName('Bar');
-        useGameStore.getState().setCurrentRoom('bar');
-
-        const savedAvatar = useUserStore.getState().avatarConfig;
-        const avatarConfig: AvatarConfig = savedAvatar ? {
-          ...savedAvatar,
-          userId: this._myUserId,
-          username: username ?? 'Player',
-        } : {
-          userId: this._myUserId,
-          username: username ?? 'Player',
-          body: 0, outfit: 0, hair: 0,
-          hairColor: '#4488ff',
-          accessory: 0, expression: 0,
-        };
-        this._network.joinRoom('bar', avatarConfig);
-
-        // Start voice after socket connected (token already validated)
-        void this._setupVoice();
-      },
-
-      onDisconnect: () => {
-        useGameStore.getState().setConnected(false);
-      },
-
-      onRoomState: (roomState) => {
-        useGameStore.getState().setUsersInRoom(roomState.totalUsers ?? roomState.users.length);
-        roomState.objects.forEach((object) => this._applyObjectState(object.objectId, object.state));
-        roomState.users.forEach((user) => {
-          if (user.userId === this._myUserId) return;
-          this._spawnRemote(
-            user.userId,
-            user.avatarConfig.username,
-            user.position.x,
-            user.position.y,
-            user.heldItem ?? null,
-            user.state,
-          );
-        });
-      },
-
-      onUserJoined: ({ userId, avatarConfig, position, state, heldItem }) => {
-        if (userId === this._myUserId) return;
-        this._spawnRemote(userId, avatarConfig.username, position.x, position.y, heldItem ?? null, state ?? 'idle');
-      },
-
-      onUserLeft: ({ userId }) => {
-        this._destroyRemote(userId);
-      },
-
-      onUserMoved: ({ userId, x, y, direction, state }) => {
-        if (userId === this._myUserId) {
-          if (state === 'sit') this.setLocalAvatarTile(x, y, 'sit');
-          else if (state === 'idle' && this._seatedSeatId) this.setLocalAvatarState(null);
-          return;
-        }
-        this._remoteAvatars.get(userId)?.updateTarget(x, y, direction, state);
-      },
-
-      onRoomUsersCount: ({ roomId, count }) => {
-        if (roomId === 'bar') useGameStore.getState().setUsersInRoom(count);
-      },
-
-      onUserHeldItem: ({ userId, item }) => {
-        if (userId === this._myUserId) return;
-        this._remoteAvatars.get(userId)?.setHeldItem(item ?? null);
-      },
-
-      onItemGranted: ({ item, petals, cost }) => {
-        this._pickUp(item);
-        if (typeof petals === 'number') this._applyServerPetals(petals);
-        const label = item === 'beer' ? 'Birra' : 'Pretzel';
-        this._showNotice(`${label}: -${cost} petali`);
-        this._syncLocalContext();
-      },
-
-      onPetalsCollected: ({ amount, petals, position, requestId }) => {
-        this._confirmPetalCollected(position, amount, petals, requestId);
-      },
-
-      onObjectStateChanged: ({ objectId, state }) => {
-        this._applyObjectState(objectId, state);
-      },
-
-      onUserEmote: ({ userId, emoteId }) => {
-        if (userId === this._myUserId) return;
-        this._remoteAvatars.get(userId)?.playEmote(emoteId);
-      },
-
-      onUserChatMessage: (message) => {
-        this._applyChatMessage(message);
-      },
-
-      onAccountUpdated: ({ petals, avatarConfig }) => {
-        if (typeof petals === 'number') this._applyServerPetals(petals);
-        if (avatarConfig) useUserStore.getState().setAvatarConfig(avatarConfig);
-      },
-
-      onError: ({ code, message, requestId }) => {
-        console.error(`[Network] ${code}: ${message}`);
-        let noticeHandled = false;
-        if (requestId && code === 'PETAL_COOLDOWN') {
-          this._forgetPendingPetalCollect(requestId);
-        } else if (requestId) {
-          this._rollbackPendingPetalCollect(requestId, message);
-          noticeHandled = true;
-        } else if ((code === 'INVALID_PETAL' || code === 'TOO_FAR') && this._pendingPetalCollects.size > 0) {
-          this._rollbackLatestPendingPetalCollect(message);
-          noticeHandled = true;
-        } else if (code === 'PETAL_COOLDOWN') {
-          this._forgetLatestPendingPetalCollect();
-        }
-        if (message) {
-          const store = useGameStore.getState();
-          if (
-            store.showPoolOverlay &&
-            (code.startsWith('POOL_') || code === 'INSUFFICIENT_PETALS' || code === 'TOO_FAR')
-          ) {
-            store.setPoolMessage({ text: message, tone: 'error' });
-          }
-          if (!noticeHandled) this._showNotice(message);
-        }
-      },
-    });
-
-    this._network.connect(username ?? 'Player', token ?? undefined);
+  private _joinNetworkRoom(roomId: string, name: string): void {
+    const store = useUserStore.getState();
+    const avatarConfig: AvatarConfig = store.avatarConfig ? {
+      ...store.avatarConfig,
+      userId: this._myUserId ?? store.userId ?? 'local',
+      username: store.username ?? 'Player',
+    } : {
+      userId: this._myUserId ?? store.userId ?? 'local',
+      username: store.username ?? 'Player',
+      body: 0,
+      outfit: 0,
+      hair: 0,
+      hairColor: '#4488ff',
+      accessory: 0,
+      expression: 0,
+    };
+    this._destroyAllRemotes();
+    useGameStore.getState().setCurrentRoom(roomId);
+    useGameStore.getState().setRoomName(name);
+    this._network.joinRoom(roomId, avatarConfig);
   }
 
   // ── Voice ─────────────────────────────────────────────────────────────────
 
   private async _setupVoice(): Promise<void> {
-    const { token } = useUserStore.getState();
-    if (!token) return;
-    // Dev escape hatch: skip voice so headless screenshot tooling can reach network idle.
-    if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('novoice')) return;
-
-    if (!this._voice) {
-      this._voice = new VoiceSystem();
-      this._voice.setCallbacks({
-        onConnected: () => useGameStore.getState().setVoiceAvailable(true),
-        onDisconnected: () => useGameStore.getState().setVoiceAvailable(false),
-        onSpeakingChanged: (userId, speaking) => this._onSpeakingChanged(userId, speaking),
-      });
-    }
-
-    await this._connectVoiceForCurrentLocation();
+    await voiceMethods.setupVoice.call(this);
   }
 
   private async _connectVoiceForCurrentLocation(): Promise<void> {
-    const { token } = useUserStore.getState();
-    if (!token || !this._voice) return;
-    if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('novoice')) return;
-
-    const voiceRoomId = `bar:${this._currentLocationId()}`;
-    const seq = ++this._voiceConnectSeq;
-    await this._voice.connect(token, voiceRoomId);
-    if (seq !== this._voiceConnectSeq) return;
-    this._mutedVoiceUsers.forEach((userId) => this._voice?.setParticipantMuted(userId, true));
-    this._syncVoiceSpatial(999);
+    await voiceMethods.connectVoiceForCurrentLocation.call(this);
   }
 
   private _syncVoiceSpatial(deltaMs: number): void {
-    this._voiceSpatialElapsed += deltaMs;
-    if (this._voiceSpatialElapsed < 220) return;
-    this._voiceSpatialElapsed = 0;
-    if (!this._voice?.isReady) {
-      this._setSpeakingUi([]);
-      return;
-    }
-
-    const local = this._localPosition();
-    if (!local) return;
-
-    const speakingUsers: Array<{ userId: string; username: string; distance: number; volume: number; pan: number }> = [];
-    this._remoteAvatars.forEach((avatar, userId) => {
-      const spatial = this._spatialFrom(local, { x: avatar.worldX, y: avatar.worldY }, 15, 0.1);
-      this._voice?.setParticipantSpatial(userId, spatial);
-      if (this._speakingVoiceUsers.has(userId) && !this._mutedVoiceUsers.has(userId)) {
-        speakingUsers.push({
-          userId,
-          username: avatar.username,
-          distance: spatial.distance,
-          volume: spatial.volume,
-          pan: spatial.pan,
-        });
-      }
-    });
-    speakingUsers.sort((a, b) => b.volume - a.volume);
-    this._setSpeakingUi(speakingUsers.slice(0, 4));
+    voiceMethods.syncVoiceSpatial.call(this, deltaMs);
   }
 
   private _setRemoteVoiceMuted(userId: string, muted: boolean): void {
-    if (muted) this._mutedVoiceUsers.add(userId);
-    else this._mutedVoiceUsers.delete(userId);
-
-    this._saveMutedVoiceUsers();
-    this._voice?.setParticipantMuted(userId, muted);
-    this._syncVoiceSpatial(999);
-    const avatar = this._remoteAvatars.get(userId);
-    useGameStore.getState().setUserActionMenu(avatar ? {
-      userId,
-      username: avatar.username,
-      muted,
-    } : null);
+    voiceMethods.setRemoteVoiceMuted.call(this, userId, muted);
   }
 
   private _onSpeakingChanged(userId: string, speaking: boolean): void {
@@ -1610,44 +657,19 @@ export class BarScene extends BaseRoomScene {
     maxDistance: number,
     minVolume: number,
   ): { volume: number; pan: number; distance: number } {
-    const dx = source.x - listener.x;
-    const dy = source.y - listener.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    const nearRadius = 1.4;
-    const t = Phaser.Math.Clamp((distance - nearRadius) / Math.max(1, maxDistance - nearRadius), 0, 1);
-    const eased = t * t * (3 - 2 * t);
-    const volume = Phaser.Math.Clamp(1 - eased, minVolume, 1);
-    const pan = Phaser.Math.Clamp((dx - dy * 0.35) / 8, -1, 1);
-    return { volume, pan, distance };
+    return voiceMethods.spatialFrom(listener, source, maxDistance, minVolume);
   }
 
   private _setSpeakingUi(users: Array<{ userId: string; username: string; distance: number; volume: number; pan: number }>): void {
-    const key = users
-      .map((user) => `${user.userId}:${Math.round(user.distance * 10)}:${Math.round(user.pan * 10)}`)
-      .join('|');
-    if (key === this._lastSpeakingUiKey) return;
-    this._lastSpeakingUiKey = key;
-    useGameStore.getState().setSpeakingUsers(users);
+    voiceMethods.setSpeakingUi.call(this, users);
   }
 
   private _loadMutedVoiceUsers(): void {
-    try {
-      const raw = localStorage.getItem(VOICE_MUTE_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      this._mutedVoiceUsers = new Set(Array.isArray(parsed)
-        ? parsed.filter((value): value is string => typeof value === 'string')
-        : []);
-    } catch {
-      this._mutedVoiceUsers = new Set();
-    }
+    voiceMethods.loadMutedVoiceUsers.call(this);
   }
 
   private _saveMutedVoiceUsers(): void {
-    try {
-      localStorage.setItem(VOICE_MUTE_STORAGE_KEY, JSON.stringify([...this._mutedVoiceUsers]));
-    } catch {
-      // Storage can be unavailable in private contexts.
-    }
+    voiceMethods.saveMutedVoiceUsers.call(this);
   }
 
   private _spawnRemote(
@@ -1657,145 +679,31 @@ export class BarScene extends BaseRoomScene {
     worldY: number,
     heldItem: HeldItem = null,
     state: AvatarState = 'idle',
+    avatarConfig?: AvatarConfig,
   ): void {
-    if (this._remoteAvatars.has(userId)) return;
-    const avatar = new RemoteAvatar({ scene: this, username, worldX, worldY });
-    this._attachRemoteInteractions(userId, username, avatar);
-    if (heldItem) avatar.setHeldItem(heldItem);
-    avatar.playAnimation(state);
-    this._remoteAvatars.set(userId, avatar);
-    this.isoSystem.register(avatar, worldX, worldY);
-    this._syncVoiceSpatial(999);
+    remoteMethods.spawnRemote.call(this, userId, username, worldX, worldY, heldItem, state, avatarConfig);
+  }
+
+  private _updateRemoteAvatar(userId: string, avatarConfig: AvatarConfig): void {
+    remoteMethods.updateRemoteAvatar.call(this, userId, avatarConfig);
+  }
+
+  private _setRemoteAvatarActive(userId: string, active: boolean): void {
+    if (active) this._movingRemoteAvatars.add(userId);
+    else this._movingRemoteAvatars.delete(userId);
   }
 
   private _attachRemoteInteractions(userId: string, username: string, avatar: RemoteAvatar): void {
-    let timer: Phaser.Time.TimerEvent | null = null;
-
-    avatar.setData('interactable', true);
-    avatar.setSize(44, 68);
-    avatar.setInteractive(
-      new Phaser.Geom.Rectangle(-22, -64, 44, 68),
-      Phaser.Geom.Rectangle.Contains,
-    );
-
-    const clearTimer = () => {
-      timer?.remove(false);
-      timer = null;
-    };
-
-    avatar.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.button !== 0) return;
-      clearTimer();
-      timer = this.time.delayedCall(520, () => {
-        timer = null;
-        useGameStore.getState().setUserActionMenu({
-          userId,
-          username,
-          muted: this._mutedVoiceUsers.has(userId),
-        });
-      });
-    });
-    avatar.on('pointerup', clearTimer);
-    avatar.on('pointerout', clearTimer);
-    avatar.on('pointerupoutside', clearTimer);
+    remoteMethods.attachRemoteInteractions.call(this, userId, username, avatar);
   }
 
   private _destroyRemote(userId: string): void {
-    const avatar = this._remoteAvatars.get(userId);
-    if (!avatar) return;
-    this.isoSystem.unregister(avatar);
-    avatar.destroy();
-    this._remoteAvatars.delete(userId);
-    this._voice?.setParticipantSpatial(userId, { volume: 0, pan: 0 });
-    this._speakingVoiceUsers.delete(userId);
-    this._syncVoiceSpatial(999);
-    if (useGameStore.getState().userActionMenu?.userId === userId) {
-      useGameStore.getState().setUserActionMenu(null);
-    }
+    remoteMethods.destroyRemote.call(this, userId);
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
   private _onShutdown(): void {
-    eventBus.off('exit-room');
-    eventBus.off('voice-toggle');
-    eventBus.off('audio-input-change');
-    eventBus.off('emote');
-    eventBus.off('leave-seat');
-    eventBus.off('consume-held-item');
-    eventBus.off('jukebox-toggle');
-    eventBus.off('jukebox-next');
-    eventBus.off('chat-send');
-    eventBus.off('waiter-call');
-    eventBus.off('waiter-order');
-    eventBus.off('fast-travel');
-    eventBus.off('voice-user-mute');
-    eventBus.off('jukebox-play-url');
-    eventBus.off('pool-open');
-    eventBus.off('pool-start-solo');
-    eventBus.off('pool-create-duo');
-    eventBus.off('pool-join-duo');
-    eventBus.off('pool-shot');
-    eventBus.off('pool-sync');
-    eventBus.off('pool-leave');
-    this.input.keyboard?.off('keydown-B');
-    this.input.keyboard?.off('keydown-ONE');
-    this.input.keyboard?.off('keydown-TWO');
-    this.input.keyboard?.off('keydown-THREE');
-    this.input.keyboard?.off('keydown-J');
-    this.input.keyboard?.off('keydown-M');
-    this.input.off(Phaser.Input.Events.POINTER_DOWN, this._primePetalAudio, this);
-    this._jukebox.destroy();
-    this._network.leaveRoom('bar');
-    this._network.disconnect();
-    void this._voice?.disconnect();
-    this._remoteAvatars.forEach((a) => a.destroy());
-    this._remoteAvatars.clear();
-    this._speakingVoiceUsers.clear();
-    this._destroyWaiterAvatar();
-    this._petalSpawnTimer?.remove(false);
-    this._petalSpawnTimer = null;
-    this._petalBlooms.forEach((bloom) => bloom.station.destroy());
-    this._petalBlooms = [];
-    this._exitStations.forEach((station) => station.destroy());
-    this._exitStations = [];
-    this._destroyLocationStations();
-    this._seatOccupants.clear();
-    this._pendingSeat = null;
-    this._seatedSeatId = null;
-    this._noticeText?.destroy();
-    this._noticeText = null;
-    this._deliveredOrderIds.clear();
-    this.destroyWorld();
-    this.input.setDefaultCursor('default');
-    useGameStore.getState().setConnected(false);
-    useGameStore.getState().setCurrentRoom(null);
-    useGameStore.getState().setRoomName(null);
-    useGameStore.getState().setLocationName(null);
-    useGameStore.getState().setRouteHint(null);
-    useGameStore.getState().setTravelTargetName(null);
-    useGameStore.getState().setShowWorldMap(false);
-    useGameStore.getState().setUserActionMenu(null);
-    useGameStore.getState().setUsersInRoom(0);
-    useGameStore.getState().setVoiceAvailable(false);
-    useGameStore.getState().setVoiceMuted(false);
-    useGameStore.getState().setSpeakingUsers([]);
-    useGameStore.getState().setHeldItem(null);
-    useGameStore.getState().setJukeboxStatus(null);
-    useGameStore.getState().setPoolStatus(null);
-    useGameStore.getState().setShowPoolOverlay(false);
-    useGameStore.getState().setPoolMessage(null);
-    useGameStore.getState().setLocalAvatarState('idle');
-    useGameStore.getState().clearChatMessages();
-    useGameStore.getState().setWaiterStatus(null);
-    useGameStore.getState().setWorldDebugMetrics(null);
-    useGameStore.getState().setActionAvailability({
-      nearJukebox: false,
-      nearWaiter: false,
-      nearPool: false,
-      canAffordAction: useGameStore.getState().petals >= PETAL_ACTION_COST,
-      canAffordPool: useGameStore.getState().petals >= POOL_PLAY_COST,
-    });
-    this._lastLocalContextKey = '';
+    shutdownMethods.onShutdown.call(this);
   }
 }

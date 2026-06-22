@@ -1,4 +1,4 @@
-import type { AvatarConfig } from '@social-square/shared';
+import type { AvatarConfig, UserProgressSnapshot } from '@social-square/shared';
 
 export interface AccountStats {
   petalsEarned: number;
@@ -28,6 +28,7 @@ export interface AccountProfile {
   email?: string;
   displayName?: string;
   picture?: string;
+  progress: UserProgressSnapshot | null;
 }
 
 export interface AuthConfig {
@@ -63,14 +64,32 @@ export async function saveAccountAvatar(token: string | null, avatarConfig: Avat
   return res.json() as Promise<AccountProfile>;
 }
 
-export async function claimDailyPresence(token: string | null): Promise<{ awarded: boolean; petals: number; stats: AccountStats; nextAt: number } | null> {
+export async function claimDailyPresence(token: string | null): Promise<{
+  awarded: boolean;
+  petals: number;
+  stats: AccountStats;
+  progress: UserProgressSnapshot;
+  nextAt: number;
+  petalReward: number;
+  xpGained: number;
+  levelUp: boolean;
+} | null> {
   if (!token) return null;
   const res = await fetch('/api/auth/profile/daily', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return null;
-  return res.json() as Promise<{ awarded: boolean; petals: number; stats: AccountStats; nextAt: number }>;
+  return res.json() as Promise<{
+    awarded: boolean;
+    petals: number;
+    stats: AccountStats;
+    progress: UserProgressSnapshot;
+    nextAt: number;
+    petalReward: number;
+    xpGained: number;
+    levelUp: boolean;
+  }>;
 }
 
 export async function logoutAccount(token: string | null): Promise<void> {

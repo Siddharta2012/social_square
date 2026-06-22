@@ -1,12 +1,15 @@
 import express, { RequestHandler } from 'express';
-import jwt from 'jsonwebtoken';
+import { env } from '../../config/env';
+import { moderationService } from '../../services/ModerationService';
 import { generateVoiceToken, isLiveKitConfigured } from '../../services/VoiceService';
+import { state } from '../../socket/handlers/roomContext';
+import { userFromAuthHeader } from '../authenticate';
 
 const router: express.Router = express.Router();
 
-const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-in-prod';
-
-interface JwtPayload { userId: string; username: string; }
+function baseRoomId(voiceRoomId: string): string {
+  return voiceRoomId.split(':')[0] || voiceRoomId;
+}
 
 const tokenHandler: RequestHandler = async (req, res) => {
   if (!isLiveKitConfigured()) {
@@ -14,19 +17,8 @@ const tokenHandler: RequestHandler = async (req, res) => {
     return;
   }
 
-  // Read identity from JWT header
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-
-  if (!token) {
-    res.status(401).json({ error: 'Auth richiesta' });
-    return;
-  }
-
-  let payload: JwtPayload;
-  try {
-    payload = jwt.verify(token, JWT_SECRET) as JwtPayload;
-  } catch {
+  const user = await userFromAuthHeader(req);
+  if (!user) {
     res.status(401).json({ error: 'Token non valido' });
     return;
   }
@@ -37,8 +29,16 @@ const tokenHandler: RequestHandler = async (req, res) => {
     return;
   }
 
-  const voiceToken = await generateVoiceToken(payload.userId, payload.username, roomId);
-  res.json({ token: voiceToken, url: process.env.LIVEKIT_URL });
+  const roomState = await state.getRoomState(baseRoomId(roomId));
+  for (const peer of roomState.users) {
+    if (peer.userId !== user.userId && await moderationService.hasEitherBlock(user.userId, peer.userId)) {
+      res.status(403).json({ error: 'VOICE_BLOCKED' });
+      return;
+    }
+  }
+
+  const voiceToken = await generateVoiceToken(user.userId, user.username, roomId);
+  res.json({ token: voiceToken, url: env.LIVEKIT_URL });
 };
 
 router.get('/token', tokenHandler);

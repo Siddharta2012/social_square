@@ -75,7 +75,7 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
     cancelAnimationFrame(rafRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    audioCtxRef.current?.close();
+    void audioCtxRef.current?.close();
     audioCtxRef.current = null;
     analyserRef.current = null;
     setLevel(0);

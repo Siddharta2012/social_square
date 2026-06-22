@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { MovementSystem } from '../systems/MovementSystem';
+import { LOCATION_DEFINITIONS, exitsForLocation, locationForId, validateLocationDefinitions } from './locations';
 import { SectorLoader } from './SectorLoader';
+import { SECTOR_REGISTRY } from './sectors';
 import { WorldMap } from './WorldMap';
 import { WorldStreamer } from './WorldStreamer';
-import { SECTOR_REGISTRY } from './sectors';
-import { LOCATION_DEFINITIONS, exitsForLocation, locationForId, validateLocationDefinitions } from './locations';
 
 async function loadAt(x: number, y: number): Promise<WorldMap> {
   const map = new WorldMap();

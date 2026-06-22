@@ -1,18 +1,20 @@
 import Phaser from 'phaser';
+import React from 'react';
+import { createRoot } from 'react-dom/client';
 import { GAME_CONFIG } from './config/game.config';
 import { BootScene } from './scenes/BootScene';
 import { MenuScene } from './scenes/MenuScene';
-import { TestRoomScene } from './scenes/rooms/TestRoomScene';
 import { BarScene } from './scenes/rooms/BarScene';
-
-import { createRoot } from 'react-dom/client';
+import { TestRoomScene } from './scenes/rooms/TestRoomScene';
 import { HUD } from './ui/HUD';
-import React from 'react';
+import { installClientErrorHandlers } from './utils/errorReporter';
 
 const game = new Phaser.Game({
   ...GAME_CONFIG,
   scene: [BootScene, MenuScene, TestRoomScene, BarScene],
 });
+
+installClientErrorHandlers();
 
 // Dev-only: expose the game instance for headless tooling (screenshots, scene control).
 if (import.meta.env.DEV) {

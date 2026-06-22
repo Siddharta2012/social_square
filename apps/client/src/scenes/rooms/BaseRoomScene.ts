@@ -6,17 +6,19 @@
  */
 
 import Phaser from 'phaser';
-import type { AvatarState } from '@social-square/shared';
 import { Avatar } from '../../entities/Avatar';
+import { useGameStore, type WorldDebugMetrics } from '../../store/gameStore';
+import { useUserStore } from '../../store/userStore';
 import { CameraSystem } from '../../systems/CameraSystem';
 import { IsometricSystem } from '../../systems/IsometricSystem';
 import { MovementSystem } from '../../systems/MovementSystem';
-import { useGameStore, type WorldDebugMetrics } from '../../store/gameStore';
+import { globalToSector, sectorKey } from '../../world/coords';
 import { SectorLoader } from '../../world/SectorLoader';
 import { SectorRenderer } from '../../world/SectorRenderer';
+import { SECTOR_REGISTRY } from '../../world/sectors';
 import { WorldMap } from '../../world/WorldMap';
 import { WorldStreamer } from '../../world/WorldStreamer';
-import { SECTOR_REGISTRY } from '../../world/sectors';
+import type { AvatarState } from '@social-square/shared';
 
 export interface WorldConfig {
   spawnX: number;
@@ -53,6 +55,8 @@ export abstract class BaseRoomScene extends Phaser.Scene {
   private _debugFrames = 0;
   private _debugFps = 0;
   private _lastFrameMs = 0;
+  private _lastStreamSectorKey: string | null = null;
+  private _lastHoverSampleKey = '';
 
   protected abstract getWorldConfig(): WorldConfig;
 
@@ -63,8 +67,14 @@ export abstract class BaseRoomScene extends Phaser.Scene {
     this.worldMap = new WorldMap();
     this._renderer = new SectorRenderer(this);
     this._streamer = new WorldStreamer(this.worldMap, new SectorLoader(SECTOR_REGISTRY), {
-      onSectorReady: (data) => this._renderer.render(data),
-      onSectorUnload: (sx, sy) => this._renderer.remove(sx, sy),
+      onSectorReady: (data) => {
+        this._renderer.render(data);
+        this._lastHoverSampleKey = '';
+      },
+      onSectorUnload: (sx, sy) => {
+        this._renderer.remove(sx, sy);
+        this._lastHoverSampleKey = '';
+      },
       onLoadingChange: (state) => useGameStore.getState().setWorldLoading(state),
     });
 
@@ -82,7 +92,7 @@ export abstract class BaseRoomScene extends Phaser.Scene {
     this._nightOverlay.setScrollFactor(0);
     this._nightOverlay.setDepth(900);
 
-    void this._streamer.update(this._config.spawnX, this._config.spawnY).then(() => {
+    void (this._streamWorldAt(this._config.spawnX, this._config.spawnY, true) ?? Promise.resolve()).then(() => {
       if (this._destroyed) return;
       this._spawnAvatar();
       this._setupCamera();
@@ -115,15 +125,15 @@ export abstract class BaseRoomScene extends Phaser.Scene {
 
     const newX = this.movementSystem.posX;
     const newY = this.movementSystem.posY;
-    this.localAvatar.setWorldPosition(newX, newY);
 
     if (newX !== this._prevAvatarX || newY !== this._prevAvatarY) {
+      this.localAvatar.setWorldPosition(newX, newY);
       const dx = newX - this._prevAvatarX;
       const dy = newY - this._prevAvatarY;
       this.localAvatar.setFacing(dx < 0 || (dx === 0 && dy > 0));
       this._prevAvatarX = newX;
       this._prevAvatarY = newY;
-      void this._streamer.update(Math.round(newX), Math.round(newY));
+      void this._streamWorldAt(Math.round(newX), Math.round(newY));
     }
 
     this.localAvatar.playAnimation(this._currentAvatarState());
@@ -148,6 +158,10 @@ export abstract class BaseRoomScene extends Phaser.Scene {
     return false;
   }
 
+  protected isLocalMovementLocked(): boolean {
+    return false;
+  }
+
   protected collectDebugExtras(): Record<string, string | number | boolean | null> {
     return {};
   }
@@ -168,11 +182,12 @@ export abstract class BaseRoomScene extends Phaser.Scene {
   }
 
   protected refreshWorldAt(x: number, y: number): Promise<void> {
-    return this._streamer.update(Math.round(x), Math.round(y));
+    return this._streamWorldAt(Math.round(x), Math.round(y), true) ?? Promise.resolve();
   }
 
   private _spawnAvatar(): void {
     const { spawnX, spawnY, username } = this._config;
+    const savedAvatar = useUserStore.getState().avatarConfig;
 
     this.localAvatar = new Avatar({
       scene: this,
@@ -180,6 +195,7 @@ export abstract class BaseRoomScene extends Phaser.Scene {
       worldX: spawnX,
       worldY: spawnY,
       isLocal: true,
+      avatarConfig: savedAvatar ?? undefined,
     });
 
     this._prevAvatarX = spawnX;
@@ -197,6 +213,7 @@ export abstract class BaseRoomScene extends Phaser.Scene {
     this.input.on(Phaser.Input.Events.POINTER_UP, (pointer: Phaser.Input.Pointer) => {
       if (pointer.button !== 0) return;
       if (!this.localAvatar) return;
+      if (this.isLocalMovementLocked()) return;
 
       const hits = this.input.hitTestPointer(pointer);
       if (hits.some((object) => object.getData('interactable'))) return;
@@ -223,6 +240,11 @@ export abstract class BaseRoomScene extends Phaser.Scene {
   }
 
   private _tryMoveToTile(tileX: number, tileY: number, ripple: boolean): boolean {
+    if (this.isLocalMovementLocked()) {
+      this.movementSystem.stopMovement();
+      return false;
+    }
+
     if (!this.worldMap.isWalkable(tileX, tileY)) {
       this.movementSystem.moveTo(tileX, tileY);
       return false;
@@ -313,6 +335,11 @@ export abstract class BaseRoomScene extends Phaser.Scene {
 
   private _updateHoverHighlight(): void {
     const pointer = this.input.activePointer;
+    const camera = this.cameras.main;
+    const sampleKey = `${Math.round(pointer.x)}:${Math.round(pointer.y)}:${Math.round(camera.scrollX)}:${Math.round(camera.scrollY)}:${camera.zoom.toFixed(2)}`;
+    if (sampleKey === this._lastHoverSampleKey) return;
+    this._lastHoverSampleKey = sampleKey;
+
     const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
     const world = IsometricSystem.isoToWorld(worldPoint.x, worldPoint.y);
     const tileX = Math.floor(world.x + 0.5);
@@ -416,6 +443,13 @@ export abstract class BaseRoomScene extends Phaser.Scene {
     useGameStore.getState().toggleDebugOverlay();
   }
 
+  private _streamWorldAt(tileX: number, tileY: number, force = false): Promise<void> | null {
+    const key = sectorKey(globalToSector(tileX), globalToSector(tileY));
+    if (!force && key === this._lastStreamSectorKey) return null;
+    this._lastStreamSectorKey = key;
+    return this._streamer.update(tileX, tileY);
+  }
+
   private _drawNightOverlay(nightFactor: number): void {
     if (!this._nightOverlay) return;
     this._nightOverlay.clear();
@@ -449,6 +483,8 @@ export abstract class BaseRoomScene extends Phaser.Scene {
     this._renderer?.destroyAll();
     this.worldMap?.clear();
     this.isoSystem?.clear();
+    this._lastStreamSectorKey = null;
+    this._lastHoverSampleKey = '';
     this._hoverGraphics?.clear();
     this._nightOverlay?.clear();
     const store = useGameStore.getState();

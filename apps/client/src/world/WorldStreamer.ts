@@ -1,7 +1,7 @@
 import { globalToSector, sectorKey } from './coords';
 import type { SectorLoader } from './SectorLoader';
-import type { WorldMap } from './WorldMap';
 import type { SectorData } from './types';
+import type { WorldMap } from './WorldMap';
 
 export type LoadingState = 'initial' | 'streaming' | null;
 
@@ -26,6 +26,7 @@ export class WorldStreamer {
   private _absentKeys = new Set<string>();
   private _inFlight = new Set<string>();
   private _initialized = false;
+  private _centerKey: string | null = null;
 
   constructor(
     private readonly map: WorldMap,
@@ -36,7 +37,15 @@ export class WorldStreamer {
   async update(playerTileX: number, playerTileY: number): Promise<void> {
     const centerSx = globalToSector(playerTileX);
     const centerSy = globalToSector(playerTileY);
-    const nextActive = new Set([sectorKey(centerSx, centerSy)]);
+    const nextCenterKey = sectorKey(centerSx, centerSy);
+
+    if (
+      this._centerKey === nextCenterKey &&
+      (this._loadedKeys.has(nextCenterKey) || this._absentKeys.has(nextCenterKey) || this._inFlight.has(nextCenterKey))
+    ) return;
+
+    const nextActive = new Set([nextCenterKey]);
+    this._centerKey = nextCenterKey;
 
     const keysToUnload = [...this._loadedKeys].filter((key) => !nextActive.has(key));
     for (const key of keysToUnload) {
@@ -85,6 +94,7 @@ export class WorldStreamer {
     this._absentKeys.clear();
     this._inFlight.clear();
     this._initialized = false;
+    this._centerKey = null;
     this.callbacks.onLoadingChange?.(null);
   }
 

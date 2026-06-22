@@ -1,0 +1,1 @@
+export const PETAL_AUTO_COLLECT_CHECK_MS = 96;

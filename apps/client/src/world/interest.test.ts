@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   JUKEBOX_OBJECT_ID,
   WAITER_OBJECT_ID,
@@ -11,6 +10,7 @@ import {
   positionToSector,
   sectorDistance,
 } from '@social-square/shared';
+import { describe, expect, it } from 'vitest';
 
 describe('interest management helpers', () => {
   it('maps world positions to sector coordinates', () => {

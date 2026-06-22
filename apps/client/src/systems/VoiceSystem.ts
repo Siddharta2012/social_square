@@ -85,7 +85,7 @@ export class VoiceSystem {
 
   toggleMute(): boolean {
     this._muted = !this._muted;
-    this._room?.localParticipant.setMicrophoneEnabled(!this._muted);
+    void this._room?.localParticipant.setMicrophoneEnabled(!this._muted);
     return this._muted;
   }
 

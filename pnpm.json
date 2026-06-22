@@ -1,3 +1,0 @@
-{
-  "onlyBuiltDependencies": ["bcrypt", "esbuild", "better-sqlite3"]
-}

@@ -7,3 +7,5 @@ export * from './constants/waiter';
 export * from './constants/pool';
 export * from './constants/interest';
 export * from './constants/interactions';
+export * from './constants/cosmetics';
+export * from './constants/progression';

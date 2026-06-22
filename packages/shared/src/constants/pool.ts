@@ -5,6 +5,16 @@ export const POOL_POSITION: Position = { x: 9, y: 8 };
 export const POOL_PLAY_COST = 200;
 export const POOL_MAX_PLAYERS = 2;
 export const POOL_PLAY_DURATION_MS = 600_000;
+export const POOL_MAX_POTTED_PER_SHOT = 4;
+export const POOL_BALL_RADIUS = 0.025;
+export const POOL_POCKET_RADIUS = 0.055;
+export const POOL_PHYSICS_FRICTION = 0.986;
+export const POOL_PHYSICS_STOP_SPEED = 0.012;
+export const POOL_PHYSICS_MAX_STEP = 1 / 180;
+export const POOL_SHOT_IMPULSE = 1.75;
+export const POOL_SPIN_CURVE = 0.42;
+export const POOL_SERVER_STEP_SECONDS = 1 / 60;
+export const POOL_SERVER_MAX_SIM_SECONDS = 12;
 
 export type PoolMode = 'solo' | 'duo';
 export type PoolPhase = 'idle' | 'waiting' | 'playing' | 'finished';
@@ -43,6 +53,13 @@ export interface PoolShotOutcome {
   scratched: boolean;
   /** The shot was a foul (currently: a scratch). */
   foul: boolean;
+  illegalBreak?: boolean;
+}
+
+export interface PoolRules {
+  legalBreakMinPotted: number;
+  ballInHandAfterScratch: boolean;
+  maxPottedPerShot: number;
 }
 
 export interface PoolState {
@@ -63,6 +80,9 @@ export interface PoolState {
   fouls: Record<string, number>;
   /** Result of the most recent resolved shot, for HUD feedback. */
   lastOutcome?: PoolShotOutcome;
+  rules: PoolRules;
+  breakResolved: boolean;
+  ballInHandUserId?: string;
   updatedAt: number;
 }
 
@@ -97,7 +117,17 @@ export function defaultPoolState(now = Date.now()): PoolState {
     balls: defaultPoolBalls(),
     scores: {},
     fouls: {},
+    rules: defaultPoolRules(),
+    breakResolved: false,
     updatedAt: now,
+  };
+}
+
+export function defaultPoolRules(): PoolRules {
+  return {
+    legalBreakMinPotted: 1,
+    ballInHandAfterScratch: true,
+    maxPottedPerShot: POOL_MAX_POTTED_PER_SHOT,
   };
 }
 
@@ -126,7 +156,21 @@ export function normalizePoolState(value: unknown, now = Date.now()): PoolState 
     scores: normalizeScoreMap(raw.scores),
     fouls: normalizeScoreMap(raw.fouls),
     lastOutcome: normalizePoolOutcome(raw.lastOutcome),
+    rules: normalizePoolRules(raw.rules),
+    breakResolved: raw.breakResolved === true,
+    ballInHandUserId: typeof raw.ballInHandUserId === 'string' ? raw.ballInHandUserId : undefined,
     updatedAt: numberOr(raw.updatedAt, now),
+  };
+}
+
+function normalizePoolRules(value: unknown): PoolRules {
+  const defaults = defaultPoolRules();
+  if (!value || typeof value !== 'object') return defaults;
+  const raw = value as Partial<PoolRules>;
+  return {
+    legalBreakMinPotted: Math.max(0, Math.min(3, Math.trunc(numberOr(raw.legalBreakMinPotted, defaults.legalBreakMinPotted)))),
+    ballInHandAfterScratch: raw.ballInHandAfterScratch !== false,
+    maxPottedPerShot: Math.max(1, Math.min(6, Math.trunc(numberOr(raw.maxPottedPerShot, defaults.maxPottedPerShot)))),
   };
 }
 
@@ -149,6 +193,7 @@ function normalizePoolOutcome(value: unknown): PoolShotOutcome | undefined {
     potted: Math.max(0, Math.min(7, Math.trunc(numberOr(raw.potted, 0)))),
     scratched: raw.scratched === true,
     foul: raw.foul === true,
+    illegalBreak: raw.illegalBreak === true,
   };
 }
 
@@ -164,7 +209,20 @@ export interface PoolShotResolution {
   keepTurn: boolean;
   nextTurnUserId: string | undefined;
   winnerUserId: string | undefined;
+  ballInHandUserId: string | undefined;
+  breakResolved: boolean;
   message: string;
+}
+
+export interface PoolPhysicsStepResult {
+  balls: PoolBall[];
+  scratched: boolean;
+}
+
+export interface PoolShotSimulation {
+  balls: PoolBall[];
+  scratched: boolean;
+  steps: number;
 }
 
 /**
@@ -181,14 +239,10 @@ export function resolvePoolShot(
   settledBalls: PoolBall[],
   scratched: boolean,
 ): PoolShotResolution {
-  const wasPocketed = new Set(
-    state.balls.filter((ball) => ball.id !== 'cue' && ball.pocketed).map((ball) => ball.id),
-  );
-  const pottedThisShot = settledBalls.filter(
-    (ball) => ball.id !== 'cue' && ball.pocketed && !wasPocketed.has(ball.id),
-  ).length;
+  const pottedThisShot = newlyPottedPoolBalls(state.balls, settledBalls);
   const remaining = settledBalls.filter((ball) => ball.id !== 'cue' && !ball.pocketed).length;
-  const foul = scratched;
+  const illegalBreak = !state.breakResolved && pottedThisShot < state.rules.legalBreakMinPotted;
+  const foul = scratched || illegalBreak;
 
   const scores: Record<string, number> = { ...state.scores };
   scores[shooterId] = Math.max(0, (scores[shooterId] ?? 0) + pottedThisShot - (foul ? 1 : 0));
@@ -205,6 +259,7 @@ export function resolvePoolShot(
       : rotatePoolTurn(state, shooterId);
 
   const winnerUserId = finished ? poolWinnerByScore(state, scores) : state.winnerUserId;
+  const ballInHandUserId = !finished && foul && state.rules.ballInHandAfterScratch ? nextTurnUserId : undefined;
   const shooterName = state.players.find((player) => player.userId === shooterId)?.username ?? 'Giocatore';
 
   let message: string;
@@ -217,6 +272,8 @@ export function resolvePoolShot(
     message = pottedThisShot > 0
       ? `${shooterName}: fallo, bilia battente in buca (-1)`
       : `${shooterName}: fallo, bilia battente in buca`;
+  } else if (illegalBreak) {
+    message = `${shooterName}: apertura non valida, cambio turno`;
   } else if (pottedThisShot >= 2) {
     message = `${shooterName} imbuca ${pottedThisShot} bilie! Tira ancora`;
   } else if (pottedThisShot === 1) {
@@ -228,12 +285,124 @@ export function resolvePoolShot(
   return {
     scores,
     fouls,
-    outcome: { userId: shooterId, potted: pottedThisShot, scratched, foul },
+    outcome: { userId: shooterId, potted: pottedThisShot, scratched, foul, illegalBreak },
     finished,
     keepTurn,
     nextTurnUserId,
     winnerUserId,
+    ballInHandUserId,
+    breakResolved: true,
     message,
+  };
+}
+
+export function newlyPottedPoolBalls(previousBalls: readonly PoolBall[], settledBalls: readonly PoolBall[]): number {
+  const wasPocketed = new Set(
+    previousBalls.filter((ball) => ball.id !== 'cue' && ball.pocketed).map((ball) => ball.id),
+  );
+  return settledBalls.filter(
+    (ball) => ball.id !== 'cue' && ball.pocketed && !wasPocketed.has(ball.id),
+  ).length;
+}
+
+export function applyPoolShotImpulse(balls: readonly PoolBall[], shot: Pick<PoolShot, 'angle' | 'power' | 'spin'>): PoolBall[] {
+  const next = balls.map((ball) => ({ ...ball, vx: 0, vy: 0 }));
+  const cue = next.find((ball) => ball.id === 'cue');
+  if (!cue || cue.pocketed) return next;
+  const power = clamp(shot.power, 0, 1);
+  cue.vx = Math.cos(shot.angle) * power * POOL_SHOT_IMPULSE;
+  cue.vy = Math.sin(shot.angle) * power * POOL_SHOT_IMPULSE;
+  cue.spin = clamp(shot.spin ?? 0, -1, 1) * power;
+  return next;
+}
+
+export function stepPoolPhysics(balls: readonly PoolBall[], dt: number): PoolPhysicsStepResult {
+  const next = balls.map((ball) => ({ ...ball }));
+  const subSteps = Math.max(1, Math.ceil(dt / POOL_PHYSICS_MAX_STEP));
+  const subDt = dt / subSteps;
+  let scratched = false;
+
+  for (let step = 0; step < subSteps; step++) {
+    for (const ball of next) {
+      if (ball.pocketed) continue;
+      const speed = Math.hypot(ball.vx, ball.vy);
+      if (ball.spin && speed > POOL_PHYSICS_STOP_SPEED) {
+        const vx = ball.vx;
+        const vy = ball.vy;
+        const curve = ball.spin * POOL_SPIN_CURVE * subDt * Math.min(1, speed / 1.2);
+        ball.vx += (-vy / speed) * curve;
+        ball.vy += (vx / speed) * curve;
+        ball.spin *= Math.pow(0.962, subDt * 60);
+        if (Math.abs(ball.spin) < 0.006) ball.spin = 0;
+      }
+
+      ball.x += ball.vx * subDt;
+      ball.y += ball.vy * subDt;
+      ball.vx *= Math.pow(POOL_PHYSICS_FRICTION, subDt * 60);
+      ball.vy *= Math.pow(POOL_PHYSICS_FRICTION, subDt * 60);
+
+      if (ball.x < 0.06 || ball.x > 0.94) {
+        ball.x = clamp(ball.x, 0.06, 0.94);
+        ball.vx *= -0.84;
+        ball.spin = -(ball.spin ?? 0) * 0.72;
+      }
+      if (ball.y < 0.09 || ball.y > 0.91) {
+        ball.y = clamp(ball.y, 0.09, 0.91);
+        ball.vy *= -0.84;
+        ball.spin = -(ball.spin ?? 0) * 0.72;
+      }
+
+      for (const pocket of POOL_POCKETS) {
+        if (Math.hypot(ball.x - pocket.x, ball.y - pocket.y) < POOL_POCKET_RADIUS) {
+          if (ball.id === 'cue') {
+            ball.x = 0.28;
+            ball.y = 0.5;
+            ball.vx = 0;
+            ball.vy = 0;
+            ball.spin = 0;
+            scratched = true;
+          } else {
+            ball.pocketed = true;
+            ball.vx = 0;
+            ball.vy = 0;
+            ball.spin = 0;
+          }
+        }
+      }
+    }
+
+    for (let i = 0; i < next.length; i++) {
+      for (let j = i + 1; j < next.length; j++) {
+        collidePoolBalls(next[i], next[j]);
+      }
+    }
+  }
+
+  return { balls: next, scratched };
+}
+
+export function simulatePoolShot(
+  balls: readonly PoolBall[],
+  shot: Pick<PoolShot, 'angle' | 'power' | 'spin'>,
+  fixedDt = POOL_SERVER_STEP_SECONDS,
+  maxSeconds = POOL_SERVER_MAX_SIM_SECONDS,
+): PoolShotSimulation {
+  let next = applyPoolShotImpulse(balls, shot);
+  let scratched = false;
+  const maxSteps = Math.ceil(maxSeconds / fixedDt);
+  let steps = 0;
+
+  for (; steps < maxSteps; steps++) {
+    const stepped = stepPoolPhysics(next, fixedDt);
+    next = stepped.balls;
+    scratched = scratched || stepped.scratched;
+    if (!next.some((ball) => !ball.pocketed && Math.hypot(ball.vx, ball.vy) > POOL_PHYSICS_STOP_SPEED)) break;
+  }
+
+  return {
+    balls: next.map((ball) => ({ ...ball, vx: 0, vy: 0, spin: 0 })),
+    scratched,
+    steps,
   };
 }
 
@@ -250,6 +419,44 @@ function poolWinnerByScore(state: PoolState, scores: Record<string, number>): st
     if ((scores[player.userId] ?? 0) > (scores[best.userId] ?? 0)) best = player;
   }
   return best.userId;
+}
+
+const POOL_POCKETS: Position[] = [
+  { x: 0.06, y: 0.09 },
+  { x: 0.5, y: 0.08 },
+  { x: 0.94, y: 0.09 },
+  { x: 0.06, y: 0.91 },
+  { x: 0.5, y: 0.92 },
+  { x: 0.94, y: 0.91 },
+];
+
+function collidePoolBalls(a: PoolBall, b: PoolBall): void {
+  if (a.pocketed || b.pocketed) return;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dist = Math.hypot(dx, dy);
+  const minDist = POOL_BALL_RADIUS * 2;
+  if (dist <= 0 || dist >= minDist) return;
+
+  const nx = dx / dist;
+  const ny = dy / dist;
+  const overlap = (minDist - dist) / 2;
+  a.x -= nx * overlap;
+  a.y -= ny * overlap;
+  b.x += nx * overlap;
+  b.y += ny * overlap;
+
+  const tx = -ny;
+  const ty = nx;
+  const dpTanA = a.vx * tx + a.vy * ty;
+  const dpTanB = b.vx * tx + b.vy * ty;
+  const dpNormA = a.vx * nx + a.vy * ny;
+  const dpNormB = b.vx * nx + b.vy * ny;
+
+  a.vx = tx * dpTanA + nx * dpNormB;
+  a.vy = ty * dpTanA + ny * dpNormB;
+  b.vx = tx * dpTanB + nx * dpNormA;
+  b.vy = ty * dpTanB + ny * dpNormA;
 }
 
 export function serializePoolBalls(balls: readonly PoolBall[]): string {

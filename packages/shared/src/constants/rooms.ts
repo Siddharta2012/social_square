@@ -34,3 +34,22 @@ export const ROOM_CONFIGS: Record<string, RoomConfig> = {
     spawnPoints: [{ x: 13, y: 21 }],
   },
 };
+
+export function privateRoomCode(roomId: string): string | null {
+  const match = /^private:([A-Z0-9]{6})$/.exec(roomId);
+  return match?.[1] ?? null;
+}
+
+export function roomConfigForId(roomId: string): RoomConfig | null {
+  const config = ROOM_CONFIGS[roomId];
+  if (config) return config;
+  const code = privateRoomCode(roomId);
+  if (!code) return null;
+  return {
+    ...ROOM_CONFIGS.bar,
+    id: roomId,
+    name: `Stanza privata ${code}`,
+    description: 'Istanza privata del bar accessibile con invito.',
+    maxUsers: 8,
+  };
+}

@@ -1,6 +1,15 @@
-import { create } from 'zustand';
 import { CHAT_HISTORY_LIMIT } from '@social-square/shared';
-import type { AvatarState, ChatMessage, HeldItem, JukeboxHistoryEntry, JukeboxTrackId, PoolState, WaiterState } from '@social-square/shared';
+import { create } from 'zustand';
+import type {
+  AvatarState,
+  ChatMessage,
+  HeldItem,
+  JukeboxHistoryEntry,
+  JukeboxTrackId,
+  PoolState,
+  UserProgressSnapshot,
+  WaiterState,
+} from '@social-square/shared';
 
 export type WorldLoadingState = 'initial' | 'streaming' | null;
 
@@ -62,6 +71,14 @@ export interface WorldDebugMetrics {
   extra: Record<string, string | number | boolean | null>;
 }
 
+function sameActionAvailability(a: ActionAvailability, b: ActionAvailability): boolean {
+  return a.nearJukebox === b.nearJukebox &&
+    a.nearWaiter === b.nearWaiter &&
+    a.nearPool === b.nearPool &&
+    a.canAffordAction === b.canAffordAction &&
+    a.canAffordPool === b.canAffordPool;
+}
+
 interface GameState {
   isConnected: boolean;
   currentRoomId: string | null;
@@ -71,6 +88,7 @@ interface GameState {
   travelTargetName: string | null;
   usersInRoom: number;
   petals: number;
+  progress: UserProgressSnapshot | null;
   showUsernameForm: boolean;
   showAuthForm: boolean;
   voiceAvailable: boolean;
@@ -84,6 +102,7 @@ interface GameState {
   setTravelTargetName: (name: string | null) => void;
   setUsersInRoom: (count: number) => void;
   setPetals: (amount: number) => void;
+  setProgress: (progress: UserProgressSnapshot | null) => void;
   setShowUsernameForm: (show: boolean) => void;
   setShowAuthForm: (show: boolean) => void;
   setVoiceAvailable: (v: boolean) => void;
@@ -132,45 +151,50 @@ export const useGameStore = create<GameState>((set) => ({
   travelTargetName: null,
   usersInRoom: 0,
   petals: 0,
+  progress: null,
   showUsernameForm: false,
   showAuthForm: false,
   voiceAvailable: false,
   voiceMuted: false,
   speakingUsers: [],
-  setConnected: (connected) => set({ isConnected: connected }),
-  setCurrentRoom: (roomId) => set({ currentRoomId: roomId }),
-  setRoomName: (name) => set({ roomName: name }),
-  setLocationName: (name) => set({ locationName: name }),
-  setRouteHint: (hint) => set({ routeHint: hint }),
-  setTravelTargetName: (name) => set({ travelTargetName: name }),
-  setUsersInRoom: (count) => set({ usersInRoom: count }),
-  setPetals: (amount) => set({ petals: Math.max(0, Math.floor(amount)) }),
-  setShowUsernameForm: (show) => set({ showUsernameForm: show }),
-  setShowAuthForm: (show) => set({ showAuthForm: show }),
-  setVoiceAvailable: (v) => set({ voiceAvailable: v }),
-  setVoiceMuted: (v) => set({ voiceMuted: v }),
-  setSpeakingUsers: (users) => set({ speakingUsers: users }),
+  setConnected: (connected) => set((state) => state.isConnected === connected ? state : { isConnected: connected }),
+  setCurrentRoom: (roomId) => set((state) => state.currentRoomId === roomId ? state : { currentRoomId: roomId }),
+  setRoomName: (name) => set((state) => state.roomName === name ? state : { roomName: name }),
+  setLocationName: (name) => set((state) => state.locationName === name ? state : { locationName: name }),
+  setRouteHint: (hint) => set((state) => state.routeHint === hint ? state : { routeHint: hint }),
+  setTravelTargetName: (name) => set((state) => state.travelTargetName === name ? state : { travelTargetName: name }),
+  setUsersInRoom: (count) => set((state) => state.usersInRoom === count ? state : { usersInRoom: count }),
+  setPetals: (amount) => set((state) => {
+    const petals = Math.max(0, Math.floor(amount));
+    return state.petals === petals ? state : { petals };
+  }),
+  setProgress: (progress) => set((state) => state.progress === progress ? state : { progress }),
+  setShowUsernameForm: (show) => set((state) => state.showUsernameForm === show ? state : { showUsernameForm: show }),
+  setShowAuthForm: (show) => set((state) => state.showAuthForm === show ? state : { showAuthForm: show }),
+  setVoiceAvailable: (v) => set((state) => state.voiceAvailable === v ? state : { voiceAvailable: v }),
+  setVoiceMuted: (v) => set((state) => state.voiceMuted === v ? state : { voiceMuted: v }),
+  setSpeakingUsers: (users) => set((state) => state.speakingUsers === users ? state : { speakingUsers: users }),
   showAudioSettings: false,
-  setShowAudioSettings: (v) => set({ showAudioSettings: v }),
+  setShowAudioSettings: (v) => set((state) => state.showAudioSettings === v ? state : { showAudioSettings: v }),
   heldItem: null,
-  setHeldItem: (item) => set({ heldItem: item }),
+  setHeldItem: (item) => set((state) => state.heldItem === item ? state : { heldItem: item }),
   worldLoading: null,
-  setWorldLoading: (state) => set({ worldLoading: state }),
+  setWorldLoading: (worldLoading) => set((state) => state.worldLoading === worldLoading ? state : { worldLoading }),
   localAvatarState: 'idle',
-  setLocalAvatarState: (state) => set({ localAvatarState: state }),
+  setLocalAvatarState: (localAvatarState) => set((state) => state.localAvatarState === localAvatarState ? state : { localAvatarState }),
   jukeboxStatus: null,
   setJukeboxStatus: (status) => set({ jukeboxStatus: status }),
   poolStatus: null,
   setPoolStatus: (status) => set({ poolStatus: status }),
   showPoolOverlay: false,
-  setShowPoolOverlay: (show) => set({ showPoolOverlay: show }),
+  setShowPoolOverlay: (show) => set((state) => state.showPoolOverlay === show ? state : { showPoolOverlay: show }),
   poolMessage: null,
   setPoolMessage: (message) => set({ poolMessage: message }),
   chatMessages: [],
   addChatMessage: (message) => set((state) => ({
     chatMessages: [...state.chatMessages, message].slice(-CHAT_HISTORY_LIMIT),
   })),
-  clearChatMessages: () => set({ chatMessages: [] }),
+  clearChatMessages: () => set((state) => state.chatMessages.length === 0 ? state : { chatMessages: [] }),
   waiterStatus: null,
   setWaiterStatus: (status) => set({ waiterStatus: status }),
   actionAvailability: {
@@ -180,9 +204,11 @@ export const useGameStore = create<GameState>((set) => ({
     canAffordAction: false,
     canAffordPool: false,
   },
-  setActionAvailability: (availability) => set({ actionAvailability: availability }),
+  setActionAvailability: (availability) => set((state) => (
+    sameActionAvailability(state.actionAvailability, availability) ? state : { actionAvailability: availability }
+  )),
   showWorldMap: false,
-  setShowWorldMap: (show) => set({ showWorldMap: show }),
+  setShowWorldMap: (show) => set((state) => state.showWorldMap === show ? state : { showWorldMap: show }),
   userActionMenu: null,
   setUserActionMenu: (menu) => set({ userActionMenu: menu }),
   showDebugOverlay: false,

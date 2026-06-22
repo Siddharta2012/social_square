@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_JUKEBOX_TRACK_ID,
   JUKEBOX_PLAY_COST,
@@ -14,7 +13,7 @@ import {
   parseJukeboxExternalTrack,
   parseYouTubeVideoId,
 } from '@social-square/shared';
-import { WorldMap } from './WorldMap';
+import { describe, expect, it } from 'vitest';
 import {
   INTERACTION_RADIUS_TILES,
   JUKEBOX_OBJECT_ID,
@@ -27,6 +26,7 @@ import { sector as barSector } from './sectors/sector_0_0';
 import { sector as gardenSector } from './sectors/sector_0_1';
 import { sector as shopsSector } from './sectors/sector_1_0';
 import { sector as plazaSector } from './sectors/sector_1_1';
+import { WorldMap } from './WorldMap';
 
 describe('phase 2 interaction data', () => {
   it('keeps every declared seat on a walkable tile', () => {

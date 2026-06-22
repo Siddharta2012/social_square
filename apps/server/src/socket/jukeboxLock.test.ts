@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_JUKEBOX_TRACK_ID,
   JUKEBOX_PLAY_DURATION_MS,
   normalizeJukeboxState,
   parseJukeboxExternalTrack,
 } from '@social-square/shared';
+import { describe, expect, it } from 'vitest';
 
 describe('jukebox lock rules', () => {
   it('keeps a paid track active for the configured play window', () => {

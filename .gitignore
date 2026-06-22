@@ -7,3 +7,5 @@ Thumbs.db
 *.log
 coverage/
 .turbo/
+.codex-logs/
+.claude/

@@ -1,7 +1,7 @@
-import type { ObjectState, Position } from '../types/events';
 import { JUKEBOX_OBJECT_ID, JUKEBOX_POSITION, SEAT_DEFINITIONS, isSeatObjectId } from './interactions';
 import { POOL_OBJECT_ID, POOL_POSITION } from './pool';
 import { WAITER_OBJECT_ID, normalizeWaiterState } from './waiter';
+import type { ObjectState, Position } from '../types/events';
 
 /** Must match the client world sector size. */
 export const WORLD_SECTOR_SIZE = 24;
