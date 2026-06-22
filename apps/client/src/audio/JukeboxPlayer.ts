@@ -100,6 +100,8 @@ export class JukeboxPlayer {
   private _youtubeShell: HTMLDivElement | null = null;
   private _youtubeFrame: HTMLIFrameElement | null = null;
   private _youtubeVideoId: string | null = null;
+  private _youtubeStartedAt: number | null = null;
+  private _youtubeActivationRequested = false;
   private _trackId: JukeboxTrackId | null = null;
   private _volume = 0.32;
   private _pan = 0;
@@ -242,10 +244,13 @@ export class JukeboxPlayer {
     const videoId = state.externalTrack?.videoId;
     if (!videoId) return;
 
-    const elapsedSeconds = state.startedAt === null ? 0 : Math.max(0, (Date.now() - state.startedAt) / 1000);
+    const elapsedSeconds = youtubeElapsedSeconds(state.startedAt);
     const src = youtubeEmbedUrl(videoId, elapsedSeconds, window.location.origin);
-    if (this._youtubeFrame && this._youtubeVideoId === videoId) {
-      this._youtubeFrame.src = src;
+    if (
+      this._youtubeFrame &&
+      this._youtubeVideoId === videoId &&
+      this._youtubeStartedAt === state.startedAt
+    ) {
       this._youtubeShell?.style.setProperty('display', 'block');
       return;
     }
@@ -253,12 +258,12 @@ export class JukeboxPlayer {
     this._hideExternalPlayer();
 
     const shell = document.createElement('div');
-    shell.style.position = 'absolute';
-    shell.style.right = '16px';
-    shell.style.bottom = '88px';
-    shell.style.width = '320px';
-    shell.style.height = '200px';
-    shell.style.zIndex = '132';
+    shell.style.position = 'fixed';
+    shell.style.right = '12px';
+    shell.style.bottom = '72px';
+    shell.style.width = 'min(380px, calc(100vw - 24px))';
+    shell.style.aspectRatio = '16 / 9';
+    shell.style.zIndex = '180';
     shell.style.background = 'rgba(10,10,30,0.94)';
     shell.style.border = '1px solid rgba(150,150,255,0.35)';
     shell.style.borderRadius = '6px';
@@ -271,29 +276,91 @@ export class JukeboxPlayer {
     frame.title = state.externalTrack?.title ?? 'YouTube jukebox';
     frame.width = '320';
     frame.height = '200';
-    frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+    frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture; web-share';
     frame.allowFullscreen = true;
+    frame.loading = 'eager';
+    frame.referrerPolicy = 'strict-origin-when-cross-origin';
     frame.style.width = '100%';
     frame.style.height = '100%';
     frame.style.border = '0';
 
+    const playButton = document.createElement('button');
+    playButton.type = 'button';
+    playButton.textContent = 'Play';
+    playButton.title = 'Play YouTube';
+    playButton.style.position = 'absolute';
+    playButton.style.left = '8px';
+    playButton.style.top = '8px';
+    playButton.style.height = '30px';
+    playButton.style.padding = '0 12px';
+    playButton.style.background = 'rgba(10,10,30,0.86)';
+    playButton.style.border = '1px solid rgba(255,244,208,0.46)';
+    playButton.style.borderRadius = '4px';
+    playButton.style.color = '#fff4d0';
+    playButton.style.fontFamily = 'monospace';
+    playButton.style.fontSize = '12px';
+    playButton.style.fontWeight = '700';
+    playButton.style.cursor = 'pointer';
+    playButton.style.zIndex = '1';
+    playButton.style.pointerEvents = 'auto';
+    playButton.addEventListener('click', () => {
+      playButton.remove();
+      this._activateYouTubePlayback();
+    });
+
+    frame.addEventListener('load', () => {
+      if (this._youtubeActivationRequested) this._seekAndPlayYouTube();
+    });
+
     shell.appendChild(frame);
+    shell.appendChild(playButton);
     document.body.appendChild(shell);
     this._youtubeShell = shell;
     this._youtubeFrame = frame;
     this._youtubeVideoId = videoId;
+    this._youtubeStartedAt = state.startedAt;
   }
 
   private _hideExternalPlayer(): void {
     this._youtubeFrame = null;
     this._youtubeVideoId = null;
+    this._youtubeStartedAt = null;
+    this._youtubeActivationRequested = false;
     this._youtubeShell?.remove();
     this._youtubeShell = null;
+  }
+
+  private _activateYouTubePlayback(): void {
+    if (!this._youtubeFrame || !this._youtubeVideoId) return;
+    this._youtubeActivationRequested = true;
+    this._seekAndPlayYouTube();
+    window.setTimeout(() => this._seekAndPlayYouTube(), 300);
+    window.setTimeout(() => this._seekAndPlayYouTube(), 900);
+    window.setTimeout(() => {
+      this._youtubeActivationRequested = false;
+    }, 1600);
+  }
+
+  private _seekAndPlayYouTube(): void {
+    this._postYouTubeCommand('seekTo', [Math.floor(youtubeElapsedSeconds(this._youtubeStartedAt)), true]);
+    this._postYouTubeCommand('playVideo');
+  }
+
+  private _postYouTubeCommand(func: 'playVideo' | 'seekTo', args: Array<number | boolean> = []): void {
+    const target = this._youtubeFrame?.contentWindow;
+    if (!target) return;
+    const message = JSON.stringify({ event: 'command', func, args });
+    target.postMessage(message, 'https://www.youtube-nocookie.com');
+    target.postMessage(message, 'https://www.youtube.com');
   }
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function youtubeElapsedSeconds(startedAt: number | null): number {
+  return startedAt === null ? 0 : Math.max(0, (Date.now() - startedAt) / 1000);
 }
 
 function createAudioContext(): AudioContext | null {
