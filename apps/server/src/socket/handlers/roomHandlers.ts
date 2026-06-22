@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import {
   Direction,
   INTERACTION_RADIUS_TILES,
+  JUKEBOX_PLAY_COST,
+  JUKEBOX_PLAY_DURATION_MS,
   JUKEBOX_OBJECT_ID,
   JUKEBOX_POSITION,
   ROOM_CONFIGS,
@@ -38,6 +40,7 @@ import type {
   WaiterState,
 } from '@social-square/shared';
 import { StateService } from '../../services/StateService';
+import { UserService } from '../../services/UserService';
 
 type IoServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type IoSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -45,6 +48,7 @@ type RoomUser = RoomState['users'][number];
 type RoomObject = RoomState['objects'][number];
 
 const state = new StateService();
+const userService = new UserService();
 const EMOTE_IDS = new Set<EmoteId>(['wave', 'dance', 'clap']);
 const WAITER_HOME: Position = { x: 2, y: 1 };
 const WAITER_COUNTER: Position = { x: 2, y: 0 };
@@ -85,6 +89,10 @@ function changedSector(a: Position, b: Position): boolean {
   const sectorA = positionToSector(a);
   const sectorB = positionToSector(b);
   return sectorA.sx !== sectorB.sx || sectorA.sy !== sectorB.sy;
+}
+
+function isActiveJukebox(state: ReturnType<typeof normalizeJukeboxState>, now = Date.now()): boolean {
+  return state.playing && (state.expiresAt === null || state.expiresAt > now);
 }
 
 async function currentRoomUser(roomId: string, userId: string): Promise<RoomUser | null> {
@@ -502,6 +510,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
       position: spawn,
       state: 'idle' as const,
     };
+    await userService.updateAvatarConfig(userId, userState.avatarConfig);
 
     await socket.join(roomId);
     socket.data.currentRoom = roomId;
@@ -610,14 +619,22 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
       const current = normalizeJukeboxState(await state.getObjectState(roomId, objectId), now);
       let next = current;
 
+      if (isActiveJukebox(current, now)) {
+        socket.emit('error', { code: 'JUKEBOX_LOCKED', message: 'Il jukebox e gia in corso' });
+        return;
+      }
+
+      let requiresPayment = false;
       if (action === 'jukebox-toggle') {
         next = {
           ...current,
-          playing: !current.playing,
-          startedAt: current.playing ? null : now,
+          playing: true,
+          startedAt: now,
+          expiresAt: now + JUKEBOX_PLAY_DURATION_MS,
           updatedAt: now,
           requestedBy: username,
         };
+        requiresPayment = true;
       } else if (action === 'jukebox-next') {
         next = {
           ...current,
@@ -625,9 +642,11 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
           externalTrack: undefined,
           playing: true,
           startedAt: now,
+          expiresAt: now + JUKEBOX_PLAY_DURATION_MS,
           updatedAt: now,
           requestedBy: username,
         };
+        requiresPayment = true;
       } else if (action === 'jukebox-play-track') {
         const trackId = isJukeboxTrackId(payload?.trackId)
           ? payload.trackId
@@ -638,9 +657,11 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
           externalTrack: undefined,
           playing: true,
           startedAt: now,
+          expiresAt: now + JUKEBOX_PLAY_DURATION_MS,
           updatedAt: now,
           requestedBy: username,
         };
+        requiresPayment = true;
       } else if (action === 'jukebox-play-url') {
         const externalTrack = parseJukeboxExternalTrack(payload?.url);
         if (!externalTrack) {
@@ -652,20 +673,26 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
           externalTrack,
           playing: true,
           startedAt: now,
+          expiresAt: now + JUKEBOX_PLAY_DURATION_MS,
           updatedAt: now,
           requestedBy: username,
         };
+        requiresPayment = true;
       } else if (action === 'jukebox-stop') {
-        next = {
-          ...current,
-          playing: false,
-          startedAt: null,
-          updatedAt: now,
-          requestedBy: username,
-        };
+        socket.emit('error', { code: 'JUKEBOX_LOCKED', message: 'Il jukebox non si puo interrompere' });
+        return;
       } else {
         socket.emit('error', { code: 'UNKNOWN_INTERACTION', message: 'Azione jukebox sconosciuta' });
         return;
+      }
+
+      if (requiresPayment) {
+        const paidUser = await userService.spendPetals(userId, JUKEBOX_PLAY_COST);
+        if (!paidUser) {
+          socket.emit('error', { code: 'INSUFFICIENT_PETALS', message: `Servono ${JUKEBOX_PLAY_COST} petali` });
+          return;
+        }
+        socket.emit('account-updated', { petals: paidUser.petals });
       }
 
       await state.updateObjectState(roomId, objectId, next as unknown as ObjectState);

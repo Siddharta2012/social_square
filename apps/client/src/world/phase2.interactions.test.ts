@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_JUKEBOX_TRACK_ID,
+  JUKEBOX_PLAY_COST,
+  JUKEBOX_PLAY_DURATION_MS,
   JUKEBOX_TRACKS,
   nextJukeboxTrackId,
   normalizeJukeboxState,
@@ -38,6 +40,8 @@ describe('phase 2 interaction data', () => {
 
   it('defines proximity and petal costs for location based actions', () => {
     expect(PETAL_ACTION_COST).toBe(100);
+    expect(JUKEBOX_PLAY_COST).toBe(200);
+    expect(JUKEBOX_PLAY_DURATION_MS).toBe(180_000);
     expect(INTERACTION_RADIUS_TILES).toBeGreaterThan(2);
     expect(isWithinInteractionRange({ x: 16, y: 3 }, { x: 17, y: 4 })).toBe(true);
     expect(isWithinInteractionRange({ x: 16, y: 3 }, { x: 22, y: 8 })).toBe(false);
@@ -47,11 +51,22 @@ describe('phase 2 interaction data', () => {
     expect(normalizeJukeboxState({ trackId: 'missing', playing: true }, 1000)).toEqual({
       trackId: DEFAULT_JUKEBOX_TRACK_ID,
       externalTrack: undefined,
-      playing: true,
+      playing: false,
       startedAt: null,
+      expiresAt: null,
       updatedAt: 1000,
       requestedBy: undefined,
     });
+  });
+
+  it('expires paid jukebox playback after its play window', () => {
+    expect(normalizeJukeboxState({
+      trackId: DEFAULT_JUKEBOX_TRACK_ID,
+      playing: true,
+      startedAt: 1000,
+      expiresAt: 2000,
+      updatedAt: 1000,
+    }, 2500).playing).toBe(false);
   });
 
   it('accepts only allowlisted YouTube jukebox links', () => {
@@ -68,6 +83,7 @@ describe('phase 2 interaction data', () => {
       externalTrack: parseJukeboxExternalTrack('https://youtu.be/dQw4w9WgXcQ'),
       playing: true,
       startedAt: 1200,
+      expiresAt: 1200 + JUKEBOX_PLAY_DURATION_MS,
       updatedAt: 1300,
     }, 1000);
 

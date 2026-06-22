@@ -5,6 +5,8 @@ export const JUKEBOX_POSITION: Position = { x: 16, y: 3 };
 export const INTERACTION_RADIUS_TILES = 3.25;
 export const PETAL_ACTION_COST = 100;
 export const PETAL_BLOOM_VALUE = 25;
+export const JUKEBOX_PLAY_COST = 200;
+export const JUKEBOX_PLAY_DURATION_MS = 180_000;
 
 export interface SeatDefinition {
   id: string;

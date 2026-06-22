@@ -55,6 +55,15 @@ describe('interest management helpers', () => {
     expect(filterObjectsByInterest(viewer, [farSeat, nearbyObject])).toEqual([nearbyObject]);
   });
 
+  it('keeps jukebox state scoped to the bar interior location', () => {
+    const barViewer = { userId: 'bar', position: { x: 9, y: 14 } };
+    const gardenViewer = { userId: 'garden', position: { x: 9, y: 30 } };
+    const jukebox = { objectId: JUKEBOX_OBJECT_ID, state: { playing: true } };
+
+    expect(isObjectVisibleToViewer(barViewer, jukebox)).toBe(true);
+    expect(isObjectVisibleToViewer(gardenViewer, jukebox)).toBe(false);
+  });
+
   it('keeps room-wide waiter state visible even outside range', () => {
     const viewer = { userId: 'bystander', position: { x: 9, y: 14 } };
     const waiter = {

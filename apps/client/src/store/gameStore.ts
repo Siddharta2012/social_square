@@ -10,6 +10,7 @@ export interface JukeboxStatus {
   playing: boolean;
   blocked: boolean;
   source: 'local' | 'youtube';
+  expiresAt: number | null;
   externalUrl?: string;
 }
 
@@ -43,6 +44,7 @@ interface GameState {
   setLocationName: (name: string | null) => void;
   setRouteHint: (hint: string | null) => void;
   setUsersInRoom: (count: number) => void;
+  setPetals: (amount: number) => void;
   addPetals: (amount: number) => void;
   spendPetals: (amount: number) => boolean;
   setShowUsernameForm: (show: boolean) => void;
@@ -90,6 +92,7 @@ export const useGameStore = create<GameState>((set) => ({
   setLocationName: (name) => set({ locationName: name }),
   setRouteHint: (hint) => set({ routeHint: hint }),
   setUsersInRoom: (count) => set({ usersInRoom: count }),
+  setPetals: (amount) => set({ petals: Math.max(0, Math.floor(amount)) }),
   addPetals: (amount) => set((state) => ({
     petals: Math.max(0, state.petals + Math.max(0, Math.floor(amount))),
   })),

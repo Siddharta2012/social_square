@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   CHAT_MAX_LENGTH,
+  JUKEBOX_PLAY_COST,
   ORDER_ITEMS,
   PETAL_ACTION_COST,
   normalizeChatText,
   orderItemLabel,
   parseJukeboxExternalTrack,
 } from '@social-square/shared';
-import type { EmoteId } from '@social-square/shared';
+import type { AvatarConfig, EmoteId } from '@social-square/shared';
 import { useGameStore } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';
 import { AuthForm } from './AuthForm';
@@ -15,6 +16,7 @@ import { VoiceControls } from './VoiceControls';
 import { AudioSettingsModal } from './AudioSettingsModal';
 import { eventBus } from '../eventBus';
 import { fastTravelLocations } from '../world/locations';
+import { fetchAccountProfile } from '../api/account';
 
 export const HUD: React.FC = () => {
   const showAuthForm = useGameStore((s) => s.showAuthForm);
@@ -44,19 +46,81 @@ export const HUD: React.FC = () => {
   const setUserActionMenu = useGameStore((s) => s.setUserActionMenu);
   const userId = useUserStore((s) => s.userId);
   const username = useUserStore((s) => s.username);
+  const token = useUserStore((s) => s.token);
   const setUser = useUserStore((s) => s.setUser);
+  const setAvatarConfig = useUserStore((s) => s.setAvatarConfig);
+  const setPetals = useGameStore((s) => s.setPetals);
   const [chatDraft, setChatDraft] = useState('');
   const [showJukeboxLink, setShowJukeboxLink] = useState(false);
   const [jukeboxUrlDraft, setJukeboxUrlDraft] = useState('');
   const [jukeboxUrlError, setJukeboxUrlError] = useState('');
+  const [clockNow, setClockNow] = useState(Date.now());
 
   const inRoom = currentRoomId !== null;
   const travelOptions = fastTravelLocations();
+  const jukeboxActive = jukeboxStatus?.playing === true;
+  const jukeboxSecondsLeft = jukeboxStatus?.expiresAt
+    ? Math.max(0, Math.ceil((jukeboxStatus.expiresAt - clockNow) / 1000))
+    : 0;
+  const jukeboxTimeLeft = jukeboxSecondsLeft > 0
+    ? `${Math.floor(jukeboxSecondsLeft / 60)}:${String(jukeboxSecondsLeft % 60).padStart(2, '0')}`
+    : '';
 
-  const handleAuthSuccess = (userId: string, uname: string, token: string) => {
-    setUser(userId, uname, token);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const callbackToken = params.get('authToken');
+    const authError = params.get('authError');
+    const shouldStart = params.get('start') === '1';
+    const nextToken = callbackToken ?? token;
+
+    if (authError) {
+      console.error('[Auth]', authError);
+      params.delete('authError');
+      window.history.replaceState(null, '', `${window.location.pathname}${params.toString() ? `?${params}` : ''}`);
+      return;
+    }
+
+    if (!nextToken) return;
+    let cancelled = false;
+    void fetchAccountProfile(nextToken)
+      .then((profile) => {
+        if (cancelled) return;
+        setUser(profile.userId, profile.username, nextToken, profile.avatarConfig);
+        setAvatarConfig(profile.avatarConfig);
+        setPetals(profile.petals);
+        setShowAuthForm(false);
+        if (callbackToken) {
+          params.delete('authToken');
+          params.delete('start');
+          window.history.replaceState(null, '', `${window.location.pathname}${params.toString() ? `?${params}` : ''}`);
+        }
+        if (shouldStart) eventBus.emit('start-game', profile.username);
+      })
+      .catch(() => {
+        if (!cancelled) useUserStore.getState().clearUser();
+      });
+
+    return () => { cancelled = true; };
+  }, [setAvatarConfig, setPetals, setShowAuthForm, setUser, token]);
+
+  useEffect(() => {
+    if (!jukeboxActive) return undefined;
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [jukeboxActive]);
+
+  const handleAuthSuccess = (data: {
+    userId: string;
+    username: string;
+    token: string;
+    petals: number;
+    avatarConfig: AvatarConfig;
+  }) => {
+    setUser(data.userId, data.username, data.token, data.avatarConfig);
+    setAvatarConfig(data.avatarConfig);
+    setPetals(data.petals);
     setShowAuthForm(false);
-    eventBus.emit('start-game', uname);
+    eventBus.emit('start-game', data.username);
   };
 
   const handleExit = () => { eventBus.emit('exit-room'); };
@@ -84,6 +148,14 @@ export const HUD: React.FC = () => {
   const submitJukeboxUrl = () => {
     if (!canUseJukebox) {
       setJukeboxUrlError('Avvicinati al jukebox');
+      return;
+    }
+    if (jukeboxActive) {
+      setJukeboxUrlError('Jukebox in corso');
+      return;
+    }
+    if (petals < JUKEBOX_PLAY_COST) {
+      setJukeboxUrlError(`Servono ${JUKEBOX_PLAY_COST} petali`);
       return;
     }
     const url = jukeboxUrlDraft.trim();
@@ -239,27 +311,29 @@ export const HUD: React.FC = () => {
               minWidth: 0, maxWidth: '260px',
             }}>
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {jukeboxStatus?.playing ? jukeboxStatus.title : 'Jukebox'}
+                {jukeboxStatus?.playing
+                  ? `${jukeboxStatus.title}${jukeboxTimeLeft ? ` ${jukeboxTimeLeft}` : ''}`
+                  : `Jukebox ${JUKEBOX_PLAY_COST} petali`}
               </span>
               <button
-                style={{ ...smallButtonStyle, ...(!canUseJukebox ? disabledButtonStyle : {}) }}
-                disabled={!canUseJukebox}
-                title={canUseJukebox ? 'Play/Stop jukebox' : 'Avvicinati al jukebox'}
+                style={{ ...smallButtonStyle, ...(!canUseJukebox || jukeboxActive ? disabledButtonStyle : {}) }}
+                disabled={!canUseJukebox || jukeboxActive}
+                title={canUseJukebox ? `${JUKEBOX_PLAY_COST} petali` : 'Avvicinati al jukebox'}
                 onClick={() => eventBus.emit('jukebox-toggle')}
               >
-                {jukeboxStatus?.playing ? 'Stop' : 'Play'}
+                Avvia
               </button>
               <button
-                style={{ ...smallButtonStyle, ...(!canUseJukebox ? disabledButtonStyle : {}) }}
-                disabled={!canUseJukebox}
-                title={canUseJukebox ? 'Brano successivo' : 'Avvicinati al jukebox'}
+                style={{ ...smallButtonStyle, ...(!canUseJukebox || jukeboxActive ? disabledButtonStyle : {}) }}
+                disabled={!canUseJukebox || jukeboxActive}
+                title={canUseJukebox ? `${JUKEBOX_PLAY_COST} petali` : 'Avvicinati al jukebox'}
                 onClick={() => eventBus.emit('jukebox-next')}
               >
                 Next
               </button>
               <button
-                style={{ ...smallButtonStyle, ...(!canUseJukebox ? disabledButtonStyle : {}) }}
-                disabled={!canUseJukebox}
+                style={{ ...smallButtonStyle, ...(!canUseJukebox || jukeboxActive ? disabledButtonStyle : {}) }}
+                disabled={!canUseJukebox || jukeboxActive}
                 title={canUseJukebox ? 'Incolla link YouTube' : 'Avvicinati al jukebox'}
                 onClick={() => {
                   setJukeboxUrlError('');
@@ -448,8 +522,8 @@ export const HUD: React.FC = () => {
           />
           <button
             type="submit"
-            style={{ ...smallButtonStyle, ...(!canUseJukebox ? disabledButtonStyle : {}) }}
-            disabled={!canUseJukebox}
+            style={{ ...smallButtonStyle, ...(!canUseJukebox || jukeboxActive ? disabledButtonStyle : {}) }}
+            disabled={!canUseJukebox || jukeboxActive}
           >
             Suona
           </button>

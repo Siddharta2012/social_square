@@ -81,6 +81,7 @@ export interface ServerToClientEvents {
   'user-held-item': (data: { userId: string; item: HeldItem }) => void;
   'user-chat-message': (data: ChatMessage) => void;
   'room-users-count': (data: { roomId: string; count: number }) => void;
+  'account-updated': (data: { petals?: number; avatarConfig?: AvatarConfig }) => void;
   'error': (data: { code: string; message: string }) => void;
 }
 

@@ -78,7 +78,7 @@ function objectHasPersonalInterest(
 }
 
 function isRoomWideObject(objectId: string): boolean {
-  return objectId === JUKEBOX_OBJECT_ID || objectId === WAITER_OBJECT_ID;
+  return objectId === WAITER_OBJECT_ID;
 }
 
 export function objectInterestPosition(object: ObjectStateSnapshot): Position | null {

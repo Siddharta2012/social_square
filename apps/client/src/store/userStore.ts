@@ -8,7 +8,7 @@ interface UserState {
   username: string | null;
   token: string | null;
   avatarConfig: AvatarConfig | null;
-  setUser: (userId: string, username: string, token?: string) => void;
+  setUser: (userId: string, username: string, token?: string, avatarConfig?: AvatarConfig) => void;
   setAvatarConfig: (config: AvatarConfig) => void;
   clearUser: () => void;
 }
@@ -22,11 +22,11 @@ export const useUserStore = create<UserState>((set) => ({
   username: null,
   token: loadToken(),
   avatarConfig: null,
-  setUser: (userId, username, token) => {
+  setUser: (userId, username, token, avatarConfig) => {
     if (token) {
       try { localStorage.setItem(TOKEN_KEY, token); } catch { /* ignore */ }
     }
-    set({ userId, username, token: token ?? loadToken() });
+    set({ userId, username, token: token ?? loadToken(), avatarConfig: avatarConfig ?? null });
   },
   setAvatarConfig: (config) => set({ avatarConfig: config }),
   clearUser: () => {

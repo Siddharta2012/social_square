@@ -40,6 +40,7 @@ export interface NetworkCallbacks {
   onObjectStateChanged?: (data: { objectId: string; state: ObjectState }) => void;
   onUserEmote?: (data: { userId: string; emoteId: EmoteId }) => void;
   onUserChatMessage?: (data: ChatMessage) => void;
+  onAccountUpdated?: (data: { petals?: number; avatarConfig?: AvatarConfig }) => void;
   onError?: (data: { code: string; message: string }) => void;
 }
 
@@ -78,6 +79,7 @@ export class NetworkSystem {
     this._socket.on('object-state-changed', (data) => this._callbacks.onObjectStateChanged?.(data));
     this._socket.on('user-emote', (data) => this._callbacks.onUserEmote?.(data));
     this._socket.on('user-chat-message', (data) => this._callbacks.onUserChatMessage?.(data));
+    this._socket.on('account-updated', (data) => this._callbacks.onAccountUpdated?.(data));
     this._socket.on('error', (data) => this._callbacks.onError?.(data));
   }
 

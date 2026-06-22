@@ -21,6 +21,8 @@ export interface JukeboxState {
   playing: boolean;
   /** Epoch milliseconds used by clients to align loop position. */
   startedAt: number | null;
+  /** Epoch milliseconds after which the paid play window ends. */
+  expiresAt: number | null;
   updatedAt: number;
   requestedBy?: string;
 }
@@ -138,11 +140,14 @@ function candidateVideoId(value: unknown): string | null {
 export function normalizeJukeboxState(value: unknown, now = Date.now()): JukeboxState {
   const raw = value && typeof value === 'object' ? value as Partial<JukeboxState> : {};
   const trackId = isJukeboxTrackId(raw.trackId) ? raw.trackId : DEFAULT_JUKEBOX_TRACK_ID;
+  const expiresAt = typeof raw.expiresAt === 'number' ? raw.expiresAt : null;
+  const playing = raw.playing === true && expiresAt !== null && expiresAt > now;
   return {
     trackId,
     externalTrack: normalizeJukeboxExternalTrack(raw.externalTrack),
-    playing: raw.playing === true,
-    startedAt: typeof raw.startedAt === 'number' ? raw.startedAt : null,
+    playing,
+    startedAt: playing && typeof raw.startedAt === 'number' ? raw.startedAt : null,
+    expiresAt,
     updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now,
     requestedBy: typeof raw.requestedBy === 'string' ? raw.requestedBy : undefined,
   };

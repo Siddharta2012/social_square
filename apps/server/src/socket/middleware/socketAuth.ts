@@ -5,6 +5,7 @@ import type { ClientToServerEvents, ServerToClientEvents, InterServerEvents, Soc
 type IoSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-in-prod';
+const ALLOW_LEGACY_SOCKET_AUTH = process.env.ALLOW_LEGACY_SOCKET_AUTH === 'true';
 
 interface JwtPayload {
   userId: string;
@@ -33,7 +34,7 @@ export function socketAuthMiddleware(
   }
 
   // Legacy path: plain username (Block A — kept for backwards compat during transition)
-  if (legacyUsername && typeof legacyUsername === 'string') {
+  if (ALLOW_LEGACY_SOCKET_AUTH && legacyUsername && typeof legacyUsername === 'string') {
     const trimmed = legacyUsername.trim();
     if (trimmed.length >= 2 && trimmed.length <= 30) {
       socket.data.userId = socket.id;

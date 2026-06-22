@@ -6,9 +6,9 @@
 
 import {
   Direction,
+  JUKEBOX_PLAY_COST,
   WAITER_OBJECT_ID,
   jukeboxTitle,
-  nextJukeboxTrackId,
   normalizeJukeboxState,
   normalizeWaiterState,
   parseJukeboxExternalTrack,
@@ -26,6 +26,7 @@ import type {
   WaiterState,
 } from '@social-square/shared';
 import { JukeboxPlayer } from '../../audio/JukeboxPlayer';
+import { adjustAccountPetals } from '../../api/account';
 import { useUserStore } from '../../store/userStore';
 import { useGameStore } from '../../store/gameStore';
 import { eventBus } from '../../eventBus';
@@ -299,6 +300,7 @@ export class BarScene extends BaseRoomScene {
     this._checkExitTileTravel();
     this._syncLocalContext();
     this._syncVoiceSpatial(delta);
+    this._syncJukeboxExpiry();
   }
 
   // ── Interactive stations ────────────────────────────────────────────────────
@@ -420,20 +422,28 @@ export class BarScene extends BaseRoomScene {
     store.setActionAvailability({ nearJukebox, nearWaiter, canAffordAction });
   }
 
-  private _trySpendPetals(): boolean {
+  private _trySpendPetals(cost = PETAL_ACTION_COST): boolean {
     const store = useGameStore.getState();
-    if (store.petals < PETAL_ACTION_COST) {
-      this._showNotice(`Servono ${PETAL_ACTION_COST} petali`);
+    if (store.petals < cost) {
+      this._showNotice(`Servono ${cost} petali`);
       return false;
     }
 
-    if (!store.spendPetals(PETAL_ACTION_COST)) {
-      this._showNotice(`Servono ${PETAL_ACTION_COST} petali`);
+    if (!store.spendPetals(cost)) {
+      this._showNotice(`Servono ${cost} petali`);
       return false;
     }
 
+    this._persistPetalDelta(-cost);
     this._syncLocalContext();
     return true;
+  }
+
+  private _persistPetalDelta(delta: number): void {
+    const token = useUserStore.getState().token;
+    void adjustAccountPetals(token, delta).then((petals) => {
+      if (petals !== null) useGameStore.getState().setPetals(petals);
+    });
   }
 
   private _startPetalSpawns(): void {
@@ -489,6 +499,7 @@ export class BarScene extends BaseRoomScene {
     this._petalBlooms = this._petalBlooms.filter((candidate) => candidate !== bloom);
     bloom.station.destroy();
     useGameStore.getState().addPetals(PETAL_BLOOM_VALUE);
+    this._persistPetalDelta(PETAL_BLOOM_VALUE);
     this._showNotice(`+${PETAL_BLOOM_VALUE} petali`);
     this._syncLocalContext();
   }
@@ -589,6 +600,7 @@ export class BarScene extends BaseRoomScene {
 
     await this.refreshWorldAt(position.x, position.y);
     this._rebuildExitStations();
+    this._syncJukeboxForLocation();
     this._syncLocalContext();
     void this._connectVoiceForCurrentLocation();
   }
@@ -757,15 +769,16 @@ export class BarScene extends BaseRoomScene {
       return;
     }
 
-    const now = Date.now();
-    const next: JukeboxState = {
-      ...this._jukeboxState,
-      playing: !this._jukeboxState.playing,
-      startedAt: this._jukeboxState.playing ? null : now,
-      updatedAt: now,
-      requestedBy: useUserStore.getState().username ?? undefined,
-    };
-    void this._applyJukeboxState(next);
+    if (this._jukeboxState.playing) {
+      this._showNotice('Jukebox in corso');
+      return;
+    }
+
+    if (useGameStore.getState().petals < JUKEBOX_PLAY_COST) {
+      this._showNotice(`Servono ${JUKEBOX_PLAY_COST} petali`);
+      return;
+    }
+
     this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-toggle');
   }
 
@@ -775,17 +788,16 @@ export class BarScene extends BaseRoomScene {
       return;
     }
 
-    const now = Date.now();
-    const next: JukeboxState = {
-      ...this._jukeboxState,
-      trackId: nextJukeboxTrackId(this._jukeboxState.trackId),
-      externalTrack: undefined,
-      playing: true,
-      startedAt: now,
-      updatedAt: now,
-      requestedBy: useUserStore.getState().username ?? undefined,
-    };
-    void this._applyJukeboxState(next);
+    if (this._jukeboxState.playing) {
+      this._showNotice('Jukebox in corso');
+      return;
+    }
+
+    if (useGameStore.getState().petals < JUKEBOX_PLAY_COST) {
+      this._showNotice(`Servono ${JUKEBOX_PLAY_COST} petali`);
+      return;
+    }
+
     this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-next');
   }
 
@@ -801,22 +813,28 @@ export class BarScene extends BaseRoomScene {
       return;
     }
 
-    const now = Date.now();
-    const next: JukeboxState = {
-      ...this._jukeboxState,
-      externalTrack,
-      playing: true,
-      startedAt: now,
-      updatedAt: now,
-      requestedBy: useUserStore.getState().username ?? undefined,
-    };
-    void this._applyJukeboxState(next);
+    if (this._jukeboxState.playing) {
+      this._showNotice('Jukebox in corso');
+      return;
+    }
+
+    if (useGameStore.getState().petals < JUKEBOX_PLAY_COST) {
+      this._showNotice(`Servono ${JUKEBOX_PLAY_COST} petali`);
+      return;
+    }
+
     this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-play-url', { url });
   }
 
   private async _applyJukeboxState(rawState: unknown): Promise<void> {
     const state = normalizeJukeboxState(rawState);
     this._jukeboxState = state;
+    if (!this._isInJukeboxLocation()) {
+      await this._jukebox.applyState({ ...state, playing: false });
+      useGameStore.getState().setJukeboxStatus(null);
+      return;
+    }
+
     const result = await this._jukebox.applyState(state);
     useGameStore.getState().setJukeboxStatus({
       trackId: state.trackId,
@@ -824,9 +842,28 @@ export class BarScene extends BaseRoomScene {
       playing: state.playing,
       blocked: result.blocked,
       source: state.externalTrack?.provider ?? 'local',
+      expiresAt: state.expiresAt,
       externalUrl: state.externalTrack?.url,
     });
     if (result.blocked) this._showNotice('Clicca Play nel player del jukebox');
+  }
+
+  private _isInJukeboxLocation(): boolean {
+    return this._currentLocationId() === '0,0';
+  }
+
+  private _syncJukeboxForLocation(): void {
+    if (this._isInJukeboxLocation()) return;
+    void this._jukebox.applyState({ ...this._jukeboxState, playing: false });
+    useGameStore.getState().setJukeboxStatus(null);
+  }
+
+  private _syncJukeboxExpiry(): void {
+    if (!this._jukeboxState.playing) return;
+    const normalized = normalizeJukeboxState(this._jukeboxState);
+    if (normalized.playing) return;
+    this._jukeboxState = normalized;
+    void this._applyJukeboxState(normalized);
   }
 
   private _applyObjectState(objectId: string, objectState: ObjectState): void {
@@ -902,7 +939,12 @@ export class BarScene extends BaseRoomScene {
         useGameStore.getState().setRoomName('Bar');
         useGameStore.getState().setCurrentRoom('bar');
 
-        const avatarConfig: AvatarConfig = {
+        const savedAvatar = useUserStore.getState().avatarConfig;
+        const avatarConfig: AvatarConfig = savedAvatar ? {
+          ...savedAvatar,
+          userId: this._myUserId,
+          username: username ?? 'Player',
+        } : {
           userId: this._myUserId,
           username: username ?? 'Player',
           body: 0, outfit: 0, hair: 0,
@@ -973,6 +1015,11 @@ export class BarScene extends BaseRoomScene {
 
       onUserChatMessage: (message) => {
         this._applyChatMessage(message);
+      },
+
+      onAccountUpdated: ({ petals, avatarConfig }) => {
+        if (typeof petals === 'number') useGameStore.getState().setPetals(petals);
+        if (avatarConfig) useUserStore.getState().setAvatarConfig(avatarConfig);
       },
 
       onError: ({ code, message }) => {
