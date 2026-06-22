@@ -47,8 +47,11 @@ export function requestPoolStart(
     return;
   }
   store.setPoolMessage({ text: t('pool.pending'), tone: 'info' });
-  this._syncPoolPositionForServer();
-  this._network?.emitInteract(POOL_OBJECT_ID, action, { requestId: requestId(action) });
+  const local = this._syncPoolPositionForServer();
+  this._network?.emitInteract(POOL_OBJECT_ID, action, {
+    requestId: requestId(action),
+    ...(local ? { playerX: local.x, playerY: local.y } : {}),
+  });
 }
 
 export function requestPoolShot(this: any, shot: { angle: number; power: number; spin?: number }): void {
@@ -114,8 +117,9 @@ export function showPoolMessage(this: any, message: string, tone: 'info' | 'erro
   this._showNotice(message);
 }
 
-export function syncPoolPositionForServer(this: any): void {
+export function syncPoolPositionForServer(this: any): { x: number; y: number } | null {
   const local = this._localPosition();
-  if (!local) return;
+  if (!local) return null;
   this._network?.emitMove(local.x, local.y, Direction.SE, 'idle', true);
+  return local;
 }

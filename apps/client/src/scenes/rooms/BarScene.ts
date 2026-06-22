@@ -561,8 +561,8 @@ export class BarScene extends BaseRoomScene {
     this.input.enabled = !locked;
   }
 
-  private _syncPoolPositionForServer(): void {
-    poolMethods.syncPoolPositionForServer.call(this);
+  private _syncPoolPositionForServer(): Position | null {
+    return poolMethods.syncPoolPositionForServer.call(this);
   }
 
   private _syncJukeboxForLocation(): void {

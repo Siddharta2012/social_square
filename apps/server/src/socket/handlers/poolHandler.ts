@@ -99,6 +99,7 @@ export async function handlePoolInteraction(
     userId,
     POOL_POSITION,
     'Avvicinati al biliardo',
+    payload,
   );
   if (!player) return;
   if (locationIdFor(player.position) !== '0,0') {
