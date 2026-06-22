@@ -4,9 +4,12 @@ import { useGameStore } from '../../../store/gameStore';
 import {
   PETAL_PENDING_TIMEOUT_MS,
   acceptPetalServerTotal,
+  collectPetalBloom,
   confirmPetalCollected,
+  petalCollectRequestId,
   removeOptimisticPetalCredit,
   rollbackPendingPetalCollect,
+  spawnPetalBloom,
   sweepStalePetalCollects,
   type PendingPetalCollect,
   type PetalBloom,
@@ -26,9 +29,16 @@ vi.mock('./stationIcons', () => ({
 const TEST_LOCATION_ID = '0,1';
 const TEST_PETAL_POINT = PETAL_SPAWN_CONFIGS[TEST_LOCATION_ID].points[0];
 
-function pending(position: Position, amount = 25, requestedAt = Date.now()): PendingPetalCollect {
+function pending(
+  position: Position,
+  amount = 25,
+  requestedAt = Date.now(),
+  requestId = petalCollectRequestId(petalPointKey(position)),
+): PendingPetalCollect {
   return {
     position,
+    pointKey: petalPointKey(position),
+    requestId,
     amount,
     requestedAt,
   };
@@ -59,6 +69,10 @@ function petalContext() {
     _syncLocalContext: vi.fn(),
     _showNotice: vi.fn(),
     _createPetalBloom: vi.fn((position: Position) => ({ position, station: { destroy: vi.fn() } })),
+    _isNear: vi.fn(() => true),
+    _syncPetalPositionForServer: vi.fn(),
+    _network: { emitInteract: vi.fn() },
+    worldMap: { getTile: vi.fn(() => ({ walkable: true })) },
   };
 }
 
@@ -76,15 +90,20 @@ describe('petal collection timing', () => {
     const ctx = petalContext();
     const first = { x: 9, y: 8 };
     const second = { x: 10, y: 8 };
-    ctx._pendingPetalCollects.set(petalPointKey(first), pending(first));
-    ctx._pendingPetalCollects.set(petalPointKey(second), pending(second));
+    const firstRequestId = petalCollectRequestId(petalPointKey(first));
+    const secondRequestId = petalCollectRequestId(petalPointKey(second));
+    ctx._pendingPetalCollects.set(firstRequestId, pending(first, 25, Date.now(), firstRequestId));
+    ctx._pendingPetalCollects.set(
+      secondRequestId,
+      pending(second, 25, Date.now(), secondRequestId),
+    );
     useGameStore.setState({ petals: 50 });
 
-    confirmPetalCollected.call(ctx, first, 25, 25, petalPointKey(first));
+    confirmPetalCollected.call(ctx, first, 25, 25, firstRequestId);
 
     expect(useGameStore.getState().petals).toBe(50);
-    expect(ctx._pendingPetalCollects.has(petalPointKey(first))).toBe(false);
-    expect(ctx._pendingPetalCollects.has(petalPointKey(second))).toBe(true);
+    expect(ctx._pendingPetalCollects.has(firstRequestId)).toBe(false);
+    expect(ctx._pendingPetalCollects.has(secondRequestId)).toBe(true);
   });
 
   it('lets newer optimistic petal totals win over stale server totals', () => {
@@ -99,27 +118,67 @@ describe('petal collection timing', () => {
   it('does not remove optimistic petals just because the server check is slow', () => {
     const ctx = petalContext();
     const position = { x: 9, y: 8 };
-    const key = petalPointKey(position);
-    ctx._pendingPetalCollects.set(key, pending(position, 25, Date.now() - PETAL_PENDING_TIMEOUT_MS - 1));
+    const requestId = petalCollectRequestId(petalPointKey(position));
+    ctx._pendingPetalCollects.set(
+      requestId,
+      pending(position, 25, Date.now() - PETAL_PENDING_TIMEOUT_MS - 1, requestId),
+    );
     useGameStore.setState({ petals: 25 });
 
     sweepStalePetalCollects.call(ctx);
 
     expect(useGameStore.getState().petals).toBe(25);
-    expect(ctx._pendingPetalCollects.get(key)?.serverCheckTimedOut).toBe(true);
+    expect(ctx._pendingPetalCollects.get(requestId)?.serverCheckTimedOut).toBe(true);
   });
 
   it('rolls back only when the server explicitly rejects the collect', () => {
     const ctx = petalContext();
     const position = TEST_PETAL_POINT;
-    const key = petalPointKey(position);
-    ctx._pendingPetalCollects.set(key, pending(position));
+    const requestId = petalCollectRequestId(petalPointKey(position));
+    ctx._pendingPetalCollects.set(requestId, pending(position, 25, Date.now(), requestId));
     useGameStore.setState({ petals: 25 });
 
-    rollbackPendingPetalCollect.call(ctx, key, 'Petali non validi');
+    rollbackPendingPetalCollect.call(ctx, requestId, 'Petali non validi');
 
     expect(useGameStore.getState().petals).toBe(0);
-    expect(ctx._pendingPetalCollects.has(key)).toBe(false);
+    expect(ctx._pendingPetalCollects.has(requestId)).toBe(false);
     expect(ctx._showNotice).toHaveBeenCalledWith('Petali non validi');
+  });
+
+  it('uses a unique request id for each collect at the same point', () => {
+    const ctx = petalContext();
+    const bloom = {
+      position: TEST_PETAL_POINT,
+      station: { destroy: vi.fn() },
+    } as unknown as PetalBloom;
+
+    collectPetalBloom.call(ctx, bloom);
+    const firstRequestId = ctx._network.emitInteract.mock.calls[0][2].requestId;
+    ctx._pendingPetalCollects.clear();
+    ctx._petalAttemptCooldowns.clear();
+    collectPetalBloom.call(ctx, bloom);
+    const secondRequestId = ctx._network.emitInteract.mock.calls[1][2].requestId;
+
+    expect(firstRequestId).not.toBe(petalPointKey(TEST_PETAL_POINT));
+    expect(secondRequestId).not.toBe(firstRequestId);
+  });
+
+  it('does not respawn a collected point while the client cooldown is active', () => {
+    const ctx = petalContext();
+    const pointKey = petalPointKey(TEST_PETAL_POINT);
+    ctx._petalBlooms = PETAL_SPAWN_CONFIGS[TEST_LOCATION_ID].points
+      .filter((point) => petalPointKey(point) !== pointKey)
+      .map((position) => ({ position, station: { destroy: vi.fn() } }) as unknown as PetalBloom);
+    ctx._petalAttemptCooldowns.set(
+      pointKey,
+      Date.now() + PETAL_SPAWN_CONFIGS[TEST_LOCATION_ID].intervalMs,
+    );
+
+    const spawned = spawnPetalBloom.call(ctx);
+
+    expect(spawned).toBe(false);
+    expect(ctx._petalBlooms.some((bloom) => petalPointKey(bloom.position) === pointKey)).toBe(
+      false,
+    );
   });
 });

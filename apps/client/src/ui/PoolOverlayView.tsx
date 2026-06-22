@@ -1,5 +1,5 @@
 import { POOL_PLAY_COST, type PoolState } from '@social-square/shared';
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { eventBus } from '../eventBus';
 import { t } from '../i18n';
 import { TABLE_H, TABLE_W } from './poolCanvasRenderer';
@@ -82,69 +82,83 @@ export const PoolOverlayView: React.FC<PoolOverlayViewProps> = ({
   handlePointerUp,
   shootCurrentAim,
 }) => {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return undefined;
-    const stop = (event: Event) => {
-      event.stopPropagation();
-    };
-    const events = [
-      'pointerdown',
-      'pointermove',
-      'pointerup',
-      'pointercancel',
-      'mousedown',
-      'mousemove',
-      'mouseup',
-      'click',
-      'touchstart',
-      'touchmove',
-      'touchend',
-      'wheel',
-      'keydown',
-      'keyup',
-    ];
-    events.forEach((eventName) => root.addEventListener(eventName, stop));
-    return () => {
-      events.forEach((eventName) => root.removeEventListener(eventName, stop));
-    };
-  }, []);
+  const stopOverlayEvent = (event: React.SyntheticEvent) => {
+    event.stopPropagation();
+  };
 
   return (
-    <div ref={rootRef} style={{
-      position: 'absolute',
-      inset: 0,
-      zIndex: 146,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: 'rgba(2,5,10,0.58)',
-      pointerEvents: 'auto',
-      fontFamily: 'monospace',
-    }}>
+    <div
+      onPointerDown={stopOverlayEvent}
+      onPointerMove={stopOverlayEvent}
+      onPointerUp={stopOverlayEvent}
+      onPointerCancel={stopOverlayEvent}
+      onClick={stopOverlayEvent}
+      onWheel={stopOverlayEvent}
+      onKeyDown={stopOverlayEvent}
+      onKeyUp={stopOverlayEvent}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 146,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(2,5,10,0.58)',
+        pointerEvents: 'auto',
+        fontFamily: 'monospace',
+      }}
+    >
       <div style={panelStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', marginBottom: '10px' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: '12px',
+            alignItems: 'center',
+            marginBottom: '10px',
+          }}
+        >
           <div style={{ minWidth: 0 }}>
-            <div style={{ color: '#fff4d0', fontSize: '15px', fontWeight: 700 }}>{t('pool.title')}</div>
-            <div style={{ color: '#88caae', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ color: '#fff4d0', fontSize: '15px', fontWeight: 700 }}>
+              {t('pool.title')}
+            </div>
+            <div
+              style={{
+                color: '#88caae',
+                fontSize: '11px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
               {playersLabel} - {turnLabel}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '7px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: '7px',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              justifyContent: 'flex-end',
+            }}
+          >
             {poolActive && (
-              <div style={{
-                minWidth: '64px',
-                textAlign: 'center',
-                color: poolExpired ? '#ffd3ca' : '#fff4d0',
-                background: poolExpired ? 'rgba(255,105,91,0.14)' : 'rgba(255,244,208,0.08)',
-                border: poolExpired ? '1px solid rgba(255,105,91,0.38)' : '1px solid rgba(255,244,208,0.26)',
-                borderRadius: '5px',
-                padding: '6px 8px',
-                fontWeight: 700,
-                fontSize: '12px',
-              }}>
+              <div
+                style={{
+                  minWidth: '64px',
+                  textAlign: 'center',
+                  color: poolExpired ? '#ffd3ca' : '#fff4d0',
+                  background: poolExpired ? 'rgba(255,105,91,0.14)' : 'rgba(255,244,208,0.08)',
+                  border: poolExpired
+                    ? '1px solid rgba(255,105,91,0.38)'
+                    : '1px solid rgba(255,244,208,0.26)',
+                  borderRadius: '5px',
+                  padding: '6px 8px',
+                  fontWeight: 700,
+                  fontSize: '12px',
+                }}
+              >
                 {poolTimeLeft || '0:00'}
               </div>
             )}
@@ -166,8 +180,12 @@ export const PoolOverlayView: React.FC<PoolOverlayViewProps> = ({
             style={{
               marginBottom: '10px',
               color: inlineMessage.tone === 'error' ? '#ffd3ca' : '#dfffee',
-              background: inlineMessage.tone === 'error' ? 'rgba(255,105,91,0.12)' : 'rgba(120,255,190,0.08)',
-              border: inlineMessage.tone === 'error' ? '1px solid rgba(255,105,91,0.32)' : '1px solid rgba(120,255,190,0.22)',
+              background:
+                inlineMessage.tone === 'error' ? 'rgba(255,105,91,0.12)' : 'rgba(120,255,190,0.08)',
+              border:
+                inlineMessage.tone === 'error'
+                  ? '1px solid rgba(255,105,91,0.32)'
+                  : '1px solid rgba(120,255,190,0.22)',
               borderRadius: '6px',
               padding: '8px 10px',
               fontSize: '12px',
@@ -179,13 +197,15 @@ export const PoolOverlayView: React.FC<PoolOverlayViewProps> = ({
         )}
 
         {showScoreboard && (
-          <div style={{
-            marginBottom: '10px',
-            background: 'rgba(120,255,190,0.05)',
-            border: '1px solid rgba(120,255,190,0.18)',
-            borderRadius: '6px',
-            padding: '8px 10px',
-          }}>
+          <div
+            style={{
+              marginBottom: '10px',
+              background: 'rgba(120,255,190,0.05)',
+              border: '1px solid rgba(120,255,190,0.18)',
+              borderRadius: '6px',
+              padding: '8px 10px',
+            }}
+          >
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'stretch' }}>
               {scoreboard.map((entry) => (
                 <div
@@ -203,38 +223,49 @@ export const PoolOverlayView: React.FC<PoolOverlayViewProps> = ({
                         : '1px solid rgba(255,255,255,0.08)',
                   }}
                 >
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'baseline',
-                    gap: '6px',
-                  }}>
-                    <span style={{
-                      color: entry.isWinner ? '#bfffe4' : '#fff4d0',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {entry.isWinner ? '🏆 ' : entry.isTurn ? '▸ ' : ''}{entry.username}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'baseline',
+                      gap: '6px',
+                    }}
+                  >
+                    <span
+                      style={{
+                        color: entry.isWinner ? '#bfffe4' : '#fff4d0',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {entry.isWinner ? '🏆 ' : entry.isTurn ? '▸ ' : ''}
+                      {entry.username}
                     </span>
-                    <span style={{ color: '#88ffbb', fontSize: '16px', fontWeight: 700 }}>{entry.score}</span>
+                    <span style={{ color: '#88ffbb', fontSize: '16px', fontWeight: 700 }}>
+                      {entry.score}
+                    </span>
                   </div>
                   <div style={{ color: '#88caae', fontSize: '10px', marginTop: '2px' }}>
-                    {entry.fouls > 0 ? t('pool.scoreFouls', { count: entry.fouls }) : t('pool.noFoul')}
+                    {entry.fouls > 0
+                      ? t('pool.scoreFouls', { count: entry.fouls })
+                      : t('pool.noFoul')}
                   </div>
                 </div>
               ))}
             </div>
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              gap: '8px',
-              marginTop: '7px',
-              color: '#88caae',
-              fontSize: '11px',
-            }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: '8px',
+                marginTop: '7px',
+                color: '#88caae',
+                fontSize: '11px',
+              }}
+            >
               <span>{pool.message ?? t('pool.ballsRemaining', { count: ballsRemaining })}</span>
               <span>{t('pool.scoreBalls', { count: ballsRemaining })}</span>
             </div>
@@ -242,15 +273,22 @@ export const PoolOverlayView: React.FC<PoolOverlayViewProps> = ({
         )}
 
         {(pool.phase === 'idle' || pool.phase === 'finished' || pool.players.length === 0) && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: isCompact ? '1fr' : '1fr 1fr',
-            gap: '10px',
-            marginBottom: '12px',
-          }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: isCompact ? '1fr' : '1fr 1fr',
+              gap: '10px',
+              marginBottom: '12px',
+            }}
+          >
             <button
               type="button"
-              style={{ ...buttonStyle, height: '74px', textAlign: 'left', ...(!canPay ? disabledStyle : {}) }}
+              style={{
+                ...buttonStyle,
+                height: '74px',
+                textAlign: 'left',
+                ...(!canPay ? disabledStyle : {}),
+              }}
               aria-disabled={!canPay}
               onClick={() => requestPoolAction('pool-start-solo')}
             >
@@ -260,11 +298,18 @@ export const PoolOverlayView: React.FC<PoolOverlayViewProps> = ({
             </button>
             <button
               type="button"
-              style={{ ...buttonStyle, height: '74px', textAlign: 'left', ...(!canPay ? disabledStyle : {}) }}
+              style={{
+                ...buttonStyle,
+                height: '74px',
+                textAlign: 'left',
+                ...(!canPay ? disabledStyle : {}),
+              }}
               aria-disabled={!canPay}
               onClick={() => requestPoolAction('pool-create-duo')}
             >
-              <strong>{pool.phase === 'finished' ? t('pool.duoRematch') : t('pool.createDuo')}</strong>
+              <strong>
+                {pool.phase === 'finished' ? t('pool.duoRematch') : t('pool.createDuo')}
+              </strong>
               <br />
               {t('pool.perPerson', { minutes: durationMinutes, cost: POOL_PLAY_COST })}
             </button>
@@ -272,22 +317,28 @@ export const PoolOverlayView: React.FC<PoolOverlayViewProps> = ({
         )}
 
         {pool.phase === 'waiting' && (
-          <div style={{
-            marginBottom: '12px',
-            display: 'grid',
-            gridTemplateColumns: isCompact ? '1fr' : '1fr auto',
-            gap: '10px',
-            alignItems: 'center',
-            color: '#dfffee',
-            background: 'rgba(120,255,190,0.06)',
-            border: '1px solid rgba(120,255,190,0.18)',
-            borderRadius: '6px',
-            padding: '10px',
-          }}>
+          <div
+            style={{
+              marginBottom: '12px',
+              display: 'grid',
+              gridTemplateColumns: isCompact ? '1fr' : '1fr auto',
+              gap: '10px',
+              alignItems: 'center',
+              color: '#dfffee',
+              background: 'rgba(120,255,190,0.06)',
+              border: '1px solid rgba(120,255,190,0.18)',
+              borderRadius: '6px',
+              padding: '10px',
+            }}
+          >
             <div>
               <div style={{ color: '#fff4d0', fontWeight: 700 }}>{t('pool.waitingTitle')}</div>
               <div style={{ color: '#88caae', fontSize: '11px', marginTop: '3px' }}>
-                {t('pool.joinInfo', { username: pool.players[0]?.username ?? t('pool.someone'), cost: POOL_PLAY_COST, minutes: durationMinutes })}
+                {t('pool.joinInfo', {
+                  username: pool.players[0]?.username ?? t('pool.someone'),
+                  cost: POOL_PLAY_COST,
+                  minutes: durationMinutes,
+                })}
               </div>
             </div>
             {!isPlayer && (
@@ -327,18 +378,20 @@ export const PoolOverlayView: React.FC<PoolOverlayViewProps> = ({
         />
 
         {isPlayer && pool.phase === 'playing' && (
-          <div style={{
-            marginTop: '10px',
-            display: 'grid',
-            gridTemplateColumns: isCompact ? '1fr' : '1.2fr 1.2fr auto',
-            gap: '10px',
-            alignItems: 'center',
-            color: '#dfffee',
-            background: 'rgba(120,255,190,0.06)',
-            border: '1px solid rgba(120,255,190,0.16)',
-            borderRadius: '6px',
-            padding: '10px',
-          }}>
+          <div
+            style={{
+              marginTop: '10px',
+              display: 'grid',
+              gridTemplateColumns: isCompact ? '1fr' : '1.2fr 1.2fr auto',
+              gap: '10px',
+              alignItems: 'center',
+              color: '#dfffee',
+              background: 'rgba(120,255,190,0.06)',
+              border: '1px solid rgba(120,255,190,0.16)',
+              borderRadius: '6px',
+              padding: '10px',
+            }}
+          >
             <label style={{ display: 'grid', gap: '5px', fontSize: '11px', color: '#88caae' }}>
               <span>{t('pool.power', { percent: Math.round(powerSetting * 100) })}</span>
               <input
@@ -380,20 +433,20 @@ export const PoolOverlayView: React.FC<PoolOverlayViewProps> = ({
           </div>
         )}
 
-        <div style={{
-          marginTop: '9px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          gap: '8px',
-          color: '#88caae',
-          fontSize: '11px',
-        }}>
+        <div
+          style={{
+            marginTop: '9px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: '8px',
+            color: '#88caae',
+            fontSize: '11px',
+          }}
+        >
           <span>{canShoot ? t('pool.aimReady') : turnLabel}</span>
           <span>{t('pool.petals', { count: petals })}</span>
         </div>
       </div>
     </div>
   );
-
-
 };

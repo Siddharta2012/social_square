@@ -1,8 +1,4 @@
-import {
-  Direction,
-  PETAL_BLOOM_OBJECT_ID,
-  type Position,
-} from '@social-square/shared';
+import { Direction, PETAL_BLOOM_OBJECT_ID, type Position } from '@social-square/shared';
 import { InteractStation } from '../../../entities/InteractStation';
 import { t } from '../../../i18n';
 import { useGameStore } from '../../../store/gameStore';
@@ -22,6 +18,8 @@ export interface PetalBloom {
 
 export interface PendingPetalCollect {
   position: Position;
+  pointKey: string;
+  requestId: string;
   amount: number;
   requestedAt: number;
   serverCheckTimedOut?: boolean;
@@ -33,6 +31,26 @@ export const PETAL_PENDING_TIMEOUT_MS = 6000;
 export const PETAL_RETRY_COOLDOWN_MS = 1500;
 export const PETAL_SPAWN_TICK_MS = 3000;
 export { PETAL_AUTO_COLLECT_CHECK_MS };
+
+export function petalCollectRequestId(pointKey: string): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return `${pointKey}:${uuid}`;
+  return `${pointKey}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function pendingPetalForPoint(
+  context: any,
+  pointKey: string,
+): [string, PendingPetalCollect] | null {
+  for (const [requestId, pending] of context._pendingPetalCollects as Map<
+    string,
+    PendingPetalCollect
+  >) {
+    if ((pending.pointKey ?? petalPointKey(pending.position)) === pointKey)
+      return [requestId, pending];
+  }
+  return null;
+}
 
 export function startPetalSpawns(this: any): void {
   this.time.delayedCall(1200, () => this._seedPetalBloomsForLocation());
@@ -64,12 +82,17 @@ export function spawnPetalBloom(this: any): boolean {
   const config = petalSpawnConfigForLocation(this._currentLocationId());
   if (!config) return false;
   if (this._petalBlooms.length >= config.maxActive) return false;
+  const now = Date.now();
 
   const available = config.points.filter((point) => {
-    const occupied = this._petalBlooms.some((bloom: PetalBloom) => (
-      Math.round(bloom.position.x) === Math.round(point.x) &&
-      Math.round(bloom.position.y) === Math.round(point.y)
-    ));
+    const key = petalPointKey(point);
+    if (pendingPetalForPoint(this, key)) return false;
+    if (now < (this._petalAttemptCooldowns.get(key) ?? 0)) return false;
+    const occupied = this._petalBlooms.some(
+      (bloom: PetalBloom) =>
+        Math.round(bloom.position.x) === Math.round(point.x) &&
+        Math.round(bloom.position.y) === Math.round(point.y),
+    );
     if (occupied) return false;
     const tile = this.worldMap.getTile(Math.round(point.x), Math.round(point.y));
     return tile?.walkable === true;
@@ -102,8 +125,11 @@ export function createPetalBloom(this: any, position: Position, amount: number):
 }
 
 export function sweepStalePetalCollects(this: any): void {
-  if (this._pendingPetalCollects.size === 0) return;
   const now = Date.now();
+  for (const [key, until] of this._petalAttemptCooldowns as Map<string, number>) {
+    if (until <= now && !pendingPetalForPoint(this, key)) this._petalAttemptCooldowns.delete(key);
+  }
+  if (this._pendingPetalCollects.size === 0) return;
   for (const pending of this._pendingPetalCollects.values()) {
     if (!pending.serverCheckTimedOut && now - pending.requestedAt >= PETAL_PENDING_TIMEOUT_MS) {
       pending.serverCheckTimedOut = true;
@@ -118,7 +144,7 @@ export function collectNearbyPetals(this: any): void {
   const now = Date.now();
   for (const bloom of [...this._petalBlooms]) {
     const key = petalPointKey(bloom.position);
-    if (this._pendingPetalCollects.has(key)) continue;
+    if (pendingPetalForPoint(this, key)) continue;
     if (now < (this._petalAttemptCooldowns.get(key) ?? 0)) continue;
     if (isWithinInteractionRange(local, bloom.position, PETAL_AUTO_COLLECT_RADIUS_TILES)) {
       this._collectPetalBloom(bloom, true);
@@ -132,14 +158,19 @@ export function collectPetalBloom(this: any, bloom: PetalBloom, automatic = fals
     return;
   }
 
-  const key = petalPointKey(bloom.position);
-  if (this._pendingPetalCollects.has(key)) return;
   const config = petalSpawnConfigForLocation(this._currentLocationId());
-  const amount = config?.value ?? 0;
-  this._pendingPetalCollects.set(key, {
+  if (!config) return;
+  const pointKey = petalPointKey(bloom.position);
+  if (pendingPetalForPoint(this, pointKey)) return;
+  const requestId = petalCollectRequestId(pointKey);
+  const amount = config.value;
+  const now = Date.now();
+  this._pendingPetalCollects.set(requestId, {
     position: { ...bloom.position },
+    pointKey,
+    requestId,
     amount,
-    requestedAt: Date.now(),
+    requestedAt: now,
   });
   this._removePetalBloom(bloom);
   if (amount > 0) {
@@ -147,12 +178,15 @@ export function collectPetalBloom(this: any, bloom: PetalBloom, automatic = fals
     this._spawnPetalCollectBurst(bloom.position, amount);
     this._playPetalCollectSound();
   }
-  this._petalAttemptCooldowns.set(key, Date.now() + PETAL_RETRY_COOLDOWN_MS);
+  this._petalAttemptCooldowns.set(
+    pointKey,
+    now + Math.max(PETAL_RETRY_COOLDOWN_MS, config.intervalMs),
+  );
   this._syncPetalPositionForServer();
   this._network?.emitInteract(PETAL_BLOOM_OBJECT_ID, 'petal-collect', {
     x: bloom.position.x,
     y: bloom.position.y,
-    requestId: key,
+    requestId,
   });
 }
 
@@ -163,11 +197,18 @@ export function confirmPetalCollected(
   petals: number,
   requestId?: string,
 ): void {
-  const key = requestId ?? petalPointKey(position);
-  const pending = this._pendingPetalCollects.get(key);
-  const bloom = this._petalBlooms.find((candidate: PetalBloom) => petalPointKey(candidate.position) === key);
-  this._pendingPetalCollects.delete(key);
-  this._petalAttemptCooldowns.delete(key);
+  const fallbackPointKey = petalPointKey(position);
+  const pendingEntry = requestId
+    ? this._pendingPetalCollects.has(requestId)
+      ? ([requestId, this._pendingPetalCollects.get(requestId)] as [string, PendingPetalCollect])
+      : null
+    : pendingPetalForPoint(this, fallbackPointKey);
+  const pending = pendingEntry?.[1] ?? null;
+  const pointKey = pending?.pointKey ?? fallbackPointKey;
+  const bloom = this._petalBlooms.find(
+    (candidate: PetalBloom) => petalPointKey(candidate.position) === pointKey,
+  );
+  if (pendingEntry) this._pendingPetalCollects.delete(pendingEntry[0]);
   if (bloom) this._removePetalBloom(bloom);
   if (!pending) {
     this._spawnPetalCollectBurst(position, amount);
@@ -186,21 +227,37 @@ export function removePetalBloom(this: any, bloom: PetalBloom): void {
 export function syncPetalPositionForServer(this: any): void {
   const local = this._localPosition();
   if (!local) return;
-  this._network?.emitMove(local.x, local.y, Direction.SE, this.movementSystem.isMoving ? 'walk' : 'idle', true);
+  this._network?.emitMove(
+    local.x,
+    local.y,
+    Direction.SE,
+    this.movementSystem.isMoving ? 'walk' : 'idle',
+    true,
+  );
 }
 
-export function rollbackPendingPetalCollect(this: any, requestId: string | undefined, message: string): void {
+export function rollbackPendingPetalCollect(
+  this: any,
+  requestId: string | undefined,
+  message: string,
+): void {
   if (!requestId) return;
   const pending = this._pendingPetalCollects.get(requestId);
   if (!pending) return;
   this._pendingPetalCollects.delete(requestId);
   this._removeOptimisticPetalCredit(pending);
+  const pointKey = pending.pointKey ?? petalPointKey(pending.position);
   const config = petalSpawnConfigForLocation(this._currentLocationId());
-  const isValidLocationPoint = Boolean(config?.points.some((point) => petalPointKey(point) === petalPointKey(pending.position)));
-  const alreadyVisible = this._petalBlooms.some((bloom: PetalBloom) => petalPointKey(bloom.position) === petalPointKey(pending.position));
+  const isValidLocationPoint = Boolean(
+    config?.points.some((point) => petalPointKey(point) === pointKey),
+  );
+  const alreadyVisible = this._petalBlooms.some(
+    (bloom: PetalBloom) => petalPointKey(bloom.position) === pointKey,
+  );
   if (config && isValidLocationPoint && !alreadyVisible) {
     this._petalBlooms.push(this._createPetalBloom({ ...pending.position }, config.value));
   }
+  this._petalAttemptCooldowns.set(pointKey, Date.now() + PETAL_RETRY_COOLDOWN_MS);
   this._showNotice(message);
 }
 
@@ -270,14 +327,17 @@ export function spawnPetalCollectBurst(this: any, position: Position, amount: nu
     });
   }
 
-  const text = this.add.text(iso.x, iso.y - 46, `+${amount}`, {
-    fontSize: '18px',
-    color: '#fff4d0',
-    fontFamily: 'monospace',
-    fontStyle: 'bold',
-    stroke: '#1a1206',
-    strokeThickness: 4,
-  }).setOrigin(0.5).setDepth(IsometricSystem.depth(position.x, position.y) + 9);
+  const text = this.add
+    .text(iso.x, iso.y - 46, `+${amount}`, {
+      fontSize: '18px',
+      color: '#fff4d0',
+      fontFamily: 'monospace',
+      fontStyle: 'bold',
+      stroke: '#1a1206',
+      strokeThickness: 4,
+    })
+    .setOrigin(0.5)
+    .setDepth(IsometricSystem.depth(position.x, position.y) + 9);
 
   this.tweens.add({
     targets: text,

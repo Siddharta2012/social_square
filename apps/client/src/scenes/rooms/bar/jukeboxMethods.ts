@@ -1,4 +1,5 @@
 import {
+  Direction,
   JUKEBOX_PLAY_COST,
   jukeboxTitle,
   normalizeJukeboxState,
@@ -7,6 +8,10 @@ import {
 import { t } from '../../../i18n';
 import { useGameStore } from '../../../store/gameStore';
 import { JUKEBOX_OBJECT_ID, JUKEBOX_POSITION } from '../../../world/interactions';
+
+function requestId(prefix: string): string {
+  return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}:${Math.random().toString(36).slice(2)}`}`;
+}
 
 export function requestJukeboxToggle(this: any): void {
   if (!this._isInJukeboxLocation()) {
@@ -28,7 +33,10 @@ export function requestJukeboxToggle(this: any): void {
     return;
   }
 
-  this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-toggle');
+  syncJukeboxPositionForServer.call(this);
+  this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-toggle', {
+    requestId: requestId('jukebox-toggle'),
+  });
 }
 
 export function requestJukeboxNext(this: any): void {
@@ -51,7 +59,10 @@ export function requestJukeboxNext(this: any): void {
     return;
   }
 
-  this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-next');
+  syncJukeboxPositionForServer.call(this);
+  this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-next', {
+    requestId: requestId('jukebox-next'),
+  });
 }
 
 export function requestJukeboxPlayUrl(this: any, url: string): void {
@@ -80,7 +91,11 @@ export function requestJukeboxPlayUrl(this: any, url: string): void {
     return;
   }
 
-  this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-play-url', { url });
+  syncJukeboxPositionForServer.call(this);
+  this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-play-url', {
+    url,
+    requestId: requestId('jukebox-play-url'),
+  });
 }
 
 export async function applyJukeboxState(this: any, rawState: unknown): Promise<void> {
@@ -133,4 +148,16 @@ export function syncJukeboxExpiry(this: any): void {
   if (normalized.playing) return;
   this._jukeboxState = normalized;
   void this._applyJukeboxState(normalized);
+}
+
+export function syncJukeboxPositionForServer(this: any): void {
+  const local = this._localPosition();
+  if (!local) return;
+  this._network?.emitMove(
+    local.x,
+    local.y,
+    Direction.SE,
+    this.movementSystem.isMoving ? 'walk' : 'idle',
+    true,
+  );
 }

@@ -20,20 +20,22 @@ export function setupNetwork(this: any): void {
       useGameStore.getState().setCurrentRoom('bar');
 
       const savedAvatar = useUserStore.getState().avatarConfig;
-      const avatarConfig: AvatarConfig = savedAvatar ? {
-        ...savedAvatar,
-        userId: this._myUserId,
-        username: username ?? 'Player',
-      } : {
-        userId: this._myUserId,
-        username: username ?? 'Player',
-        body: 0,
-        outfit: 0,
-        hair: 0,
-        hairColor: '#4488ff',
-        accessory: 0,
-        expression: 0,
-      };
+      const avatarConfig: AvatarConfig = savedAvatar
+        ? {
+            ...savedAvatar,
+            userId: this._myUserId,
+            username: username ?? 'Player',
+          }
+        : {
+            userId: this._myUserId,
+            username: username ?? 'Player',
+            body: 0,
+            outfit: 0,
+            hair: 0,
+            hairColor: '#4488ff',
+            accessory: 0,
+            expression: 0,
+          };
       this._network.joinRoom('bar', avatarConfig);
 
       void this._setupVoice();
@@ -45,13 +47,23 @@ export function setupNetwork(this: any): void {
 
     onRoomState: (roomState: any) => {
       useGameStore.getState().setCurrentRoom(roomState.roomId);
-      useGameStore.getState().setRoomName(roomState.roomId.startsWith('private:') ? 'Stanza privata' : 'Bar');
+      useGameStore
+        .getState()
+        .setRoomName(roomState.roomId.startsWith('private:') ? 'Stanza privata' : 'Bar');
       applyAuthoritativeRoomState(this, roomState);
     },
 
     onUserJoined: ({ userId, avatarConfig, position, state, heldItem }: any) => {
       if (userId === this._myUserId) return;
-      this._spawnRemote(userId, avatarConfig.username, position.x, position.y, heldItem ?? null, state ?? 'idle', avatarConfig);
+      this._spawnRemote(
+        userId,
+        avatarConfig.username,
+        position.x,
+        position.y,
+        heldItem ?? null,
+        state ?? 'idle',
+        avatarConfig,
+      );
     },
 
     onUserAvatarUpdated: ({ userId, avatarConfig }: any) => {
@@ -78,7 +90,8 @@ export function setupNetwork(this: any): void {
     },
 
     onRoomUsersCount: ({ roomId, count }: any) => {
-      if (roomId === useGameStore.getState().currentRoomId) useGameStore.getState().setUsersInRoom(count);
+      if (roomId === useGameStore.getState().currentRoomId)
+        useGameStore.getState().setUsersInRoom(count);
     },
 
     onUserHeldItem: ({ userId, item }: any) => {
@@ -114,7 +127,9 @@ export function setupNetwork(this: any): void {
     onWhisperMessage: (message: any) => {
       eventBus.emit('whisper-received', message);
       const mine = message.fromUserId === this._myUserId;
-      this._showNotice(mine ? `Whisper a ${message.toUserId}` : `Whisper da ${message.fromUsername}`);
+      this._showNotice(
+        mine ? `Whisper a ${message.toUserId}` : `Whisper da ${message.fromUsername}`,
+      );
     },
 
     onAccountUpdated: ({ petals, avatarConfig, progress }: any) => {
@@ -130,10 +145,18 @@ export function setupNetwork(this: any): void {
       const localizedMessage = errorText(code, message);
       console.error(`[Network] ${code}: ${message}`);
       let noticeHandled = false;
-      if (requestId) {
-        this._rollbackPendingPetalCollect(requestId, localizedMessage);
+      if (requestId && this._pendingPetalCollects.has(requestId)) {
+        if (code === 'PETAL_COOLDOWN') {
+          this._forgetPendingPetalCollect(requestId);
+          this._showNotice(localizedMessage);
+        } else {
+          this._rollbackPendingPetalCollect(requestId, localizedMessage);
+        }
         noticeHandled = true;
-      } else if ((code === 'INVALID_PETAL' || code === 'TOO_FAR') && this._pendingPetalCollects.size > 0) {
+      } else if (
+        (code === 'INVALID_PETAL' || code === 'TOO_FAR') &&
+        this._pendingPetalCollects.size > 0
+      ) {
         this._rollbackLatestPendingPetalCollect(localizedMessage);
         noticeHandled = true;
       } else if (code === 'PETAL_COOLDOWN') {
