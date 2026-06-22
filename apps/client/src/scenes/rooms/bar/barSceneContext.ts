@@ -28,6 +28,7 @@ import type { SeatDefinition } from '../../../world/interactions';
 import type { LocationExit, LocationId } from '../../../world/locations';
 import type {
   AvatarState,
+  ChatMessage,
   JukeboxState,
   ObjectState,
   PoolState,
@@ -147,6 +148,8 @@ export interface BarSceneContext extends Phaser.Scene {
   _requestSit(seat: SeatDefinition): void;
   _leaveSeat(emit: boolean): void;
   _applySeatState(objectId: string, objectState: ObjectState): void;
+  _applyObjectState(objectId: string, objectState: ObjectState): void;
+  _applyChatMessage(message: ChatMessage): void;
 
   // jukebox
   _requestJukeboxToggle(): void;
