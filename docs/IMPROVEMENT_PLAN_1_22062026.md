@@ -9,14 +9,45 @@
 > **Repo:** pnpm monorepo — `apps/client` (Phaser 3 + React HUD + Vite + Zustand),
 > `apps/server` (Express + Socket.IO + ioredis + zod + JWT + pg), `packages/shared`.
 
+> **🔄 Progress update — 2026-06-22 (post-Codex pass).** Most of Phase 1 has been
+> implemented (commits `bdc57cb` → `8b3094a`). Each objective below now carries a
+> **Status** with evidence. **Phase 2** (O14–O21) is the new backlog: finish the
+> partials and push retention/quality further. Legend: ✅ Done · 🟡 Partial · 🔴 Open.
+
+---
+
+## Progress snapshot
+
+| # | Objective | Status | Evidence |
+|---|-----------|--------|----------|
+| O1 | Durable Postgres accounts | ✅ | `config/database.ts` (`query`/`withTransaction`), `UserService` SQL, `docs/security/economy.md` |
+| O2 | Atomic ledger wallet | ✅ | `petal_ledger`, `SELECT … FOR UPDATE`, `ref_id` idempotency, balance repair |
+| O3 | Kill write-on-read | ✅ | reads are pure `SELECT`s; Redis no longer stores accounts |
+| O4 | Server-authoritative pool | 🟡 | `poolHandler.validatePoolSyncHint` + `poolAuthority.test.ts`; **residual client trust remains** → O14 |
+| O5 | Lock endpoints + headers | ✅ | `securityHeaders`, `requireAdmin` on `/metrics`+admin, `express.json({limit:'64kb'})`, `utils/httpSecurity.ts` |
+| O6 | Auth hardening | ✅ | `/register` vs `/login`, password ≥ 8, OAuth PKCE + state-cookie nonce, `auth_sessions` + `token_version` revocation |
+| O7 | Moderation & safety | 🟡 | `ModerationService` (block/report/audit + `moderateChatText`); **no age gate / room mute-kick / ban-on-connect** → O15 |
+| O8 | Horizontal-scale readiness | ✅ | `socketServer` `@socket.io/redis-adapter`, `rateLimit` via Redis `INCR`/`PEXPIRE` |
+| O9 | Cosmetic shop | 🟡 | `routes/shop.ts` + service, `api/shop.ts`, `HudShopModal`; **verify ledger idempotency + equip rules** → O19 |
+| O10 | Progression & return loop | 🔴 | only `claimDailyPresence` exists; no XP/quests/streaks → O16 |
+| O11 | Social graph | 🟡 | `SocialService` (friends), `routes/social.ts`, `HudFriendsModal`; **no whispers/DM** → O20 |
+| O12 | More social surfaces | 🟡 | private rooms done (`PrivateRoomService`, `routes/private-rooms`); **no new game / events** → O21 |
+| O13 | Decompose UI monoliths | ✅ | `ui/hud/*`, `PoolOverlayView` + `poolCanvasRenderer` |
+
+**Also landed from `docs/IMPROVEMENT_PLAN.md` (Phase 0):** CI (`.github/workflows/ci.yml`),
+ESLint flat config (`eslint.config.mjs`) + Prettier + per-package `lint`/`typecheck`/`test`,
+env validation (`config/env.ts`), i18n seam (`client/src/i18n`), reconnect resync
+(`bar/roomStateReconciler.ts`), shared `vitest`, socket payload schemas (`socketSchemas.ts`),
+single bcrypt impl (`bcryptjs`). 
+
 ---
 
 ## 0. How to work (objective-mode protocol)
 
 For **every** objective `O*`:
 
-1. **One objective = one branch = one PR.** Branch: `<type>/p1-<id>-<slug>`
-   (e.g. `feat/p1-o1-postgres-accounts`). Never work on `main`.
+1. **One objective = one branch = one PR.** Branch: `<type>/p2-<id>-<slug>`
+   (e.g. `feat/p2-o16-progression`). Never work on `main`.
 2. **Read before writing.** Open the cited files and the code around them; match
    existing style (English comments, strict TS, 2-space).
 3. **Stay in scope.** Do only the objective's *Tasks*. Unrelated problems go in
@@ -30,280 +61,201 @@ For **every** objective `O*`:
    pnpm -r test
    pnpm build
    ```
-   Run server tests with `REDIS_MOCK=true` (in-memory mock). Paste the output (or a
-   faithful summary) into the PR. No success claims without running them.
+   Run server tests with `REDIS_MOCK=true`; DB-backed tests need a Postgres (see O17).
+   Paste the output (or a faithful summary) into the PR. No success claims without
+   running them.
 5. **Tests ship with the change.** New logic → unit tests. Bug/security fix →
    a regression test that fails before the fix.
 6. **Conventional Commits.** Footer: `Co-Authored-By: <agent> <noreply@…>`.
 7. **Never commit** `dist/`, `*.log`, `.env`, `node_modules`.
 8. **Acceptance is binding.** Done = every checkbox verifiably true.
 
-**Execution order:** P0 → P1 → P2, in listed order. P0 objectives are data/money
-integrity and must land first; several later objectives assume O1–O2 exist.
+**Execution order for Phase 2:** P0 (O14, O17) → P1 (O15, O18, O19) → P2 (O16, O20, O21).
+O17 (DB-backed CI) should land early so every later DB change is actually tested.
 
 ---
 
-## Priority map
+# Phase 1 (status-annotated)
 
-| Pri | Objectives | Theme |
-|-----|-----------|-------|
-| **P0** | O1, O2, O3, O4 | Durable accounts, atomic ledger wallet, kill write-on-read, server-authoritative pool |
-| **P1** | O5, O6, O7, O8 | Endpoint/header hardening, auth hardening, moderation & safety, horizontal-scale readiness |
-| **P2** | O9, O10, O11, O12, O13 | Cosmetic sink, progression, social graph, more rooms/games, UI monolith decomposition |
+> These were the original audit objectives. Done/Partial markers reflect the
+> 2026-06-22 Codex pass; partials are continued in Phase 2.
 
-**Audit evidence (read these first):** `apps/server/src/services/UserService.ts`,
-`apps/server/src/config/database.ts`, `apps/server/src/index.ts`,
-`apps/server/src/api/routes/auth.ts`, `apps/server/src/socket/middleware/socketAuth.ts`,
-`apps/server/src/socket/handlers/poolHandler.ts`, `apps/server/src/utils/rateLimit.ts`.
+## O1 — Durable Postgres system of record · ✅ Done
+Accounts/wallet now persist in Postgres (`config/database.ts`, `UserService` SQL).
+Redis holds only ephemeral state. **Residual:** confirm the one-shot
+`pnpm --filter server import:redis-users` cutover script is documented and tested
+(rolled into O17).
 
----
+## O2 — Atomic, ledger-backed wallet · ✅ Done
+`petal_ledger` + `SELECT … FOR UPDATE` in `withTransaction`, idempotency via
+`ref_id`, balance repaired from ledger. **Residual:** invariant monitoring (O19).
 
-# P0 — Data & economy integrity
+## O3 — Eliminate write-on-read amplification · ✅ Done
+Reads are pure `SELECT`s; the Redis write-on-read pattern is gone.
 
-## O1 — Make Postgres the durable system of record for accounts
-**Area:** persistence/data-loss · **Severity:** critical
-**Why:** `UserService` stores users, `passwordHash`, `petals`, and stats **only in
-Redis** (`apps/server/src/services/UserService.ts`); Postgres is connected solely
-for a `select 1` health check (`apps/server/src/config/database.ts`). Redis is a
-cache: under `maxmemory` eviction or a flush, **all accounts and wallets are lost**.
-`persist()` does not protect against `allkeys-lru` eviction. This is the #1 risk.
+## O4 — Server-authoritative pool outcomes · 🟡 Partial → see O14
+`validatePoolSyncHint` rejects forged syncs (`poolAuthority.test.ts`) and bounds
+implausible pots, but per `docs/security/economy.md` the client still reports final
+ball positions + scratch. Full authority (server runs the physics) is **O14**.
 
-**Tasks**
-- Add a migration system (numbered SQL + a `pnpm --filter server migrate` runner,
-  or `node-pg-migrate`). Convert `scripts/init.sql` into migration `0001` and add a
-  migration for the real `users` table (id, username unique CI, provider,
-  password_hash, google_sub unique, email, display_name, picture, avatar_config
-  jsonb, position jsonb, unlocked_items jsonb, petals bigint, stats jsonb,
-  created_at, updated_at).
-- Rewrite `UserService` to read/write Postgres as the source of truth. Keep Redis
-  **only** for ephemeral runtime state (presence, room/object state, cooldowns,
-  rate limits) — never as the wallet store.
-- Add a one-time **migration script** that imports existing Redis user blobs into
-  Postgres (so current accounts/petals survive the cutover).
-- `/api/ready` already checks the DB — keep it; now it's meaningful.
+## O5 — Lock down endpoints & headers · ✅ Done
+`securityHeaders` middleware, `requireAdmin` on `/metrics` and `/api/admin/*`, JSON
+body limit. **Residual:** verify the CSP allows LiveKit/media in production (O18).
 
-**Acceptance**
-- [ ] Wiping Redis (`FLUSHALL` on a test instance) loses **no** account or petal data.
-- [ ] `pnpm --filter server migrate` builds the schema from an empty DB reproducibly.
-- [ ] Existing Redis users are importable via the documented one-shot script.
-- [ ] No user/economy field is read from Redis anymore (grep `UserService` for `redis`).
+## O6 — Harden authentication & sessions · ✅ Done
+Register/login split, password ≥ 8, OAuth PKCE + signed state-cookie nonce,
+`auth_sessions` + `token_version` so logout/revoke is real.
 
-## O2 — Atomic, ledger-backed wallet (no more lost/duplicated petals)
-**Area:** economy correctness · **Severity:** critical · **Depends on:** O1
-**Why:** `awardPetals`/`spendPetals` do non-atomic read-modify-write
-(`UserService.ts` ~L229–275): `findById` → mutate → `saveUser`, with no
-`WATCH/MULTI`/locking. Concurrent operations (the 32 ms petal auto-collect loop +
-any purchase) interleave and clobber each other → petals lost or duplicated. It is
-exploitable.
+## O7 — Moderation & safety suite · 🟡 Partial → see O15
+Block/unblock, reports, audit log, and `moderateChatText` filter exist. Missing:
+age gate + ToS consent, room mute/kick, global ban enforced on connect, and wiring
+the filter into **every** chat path. Continued in **O15**.
 
-**Tasks**
-- Model the wallet as an **append-only ledger** table (`petal_ledger`: id, user_id,
-  delta, reason, ref_id, balance_after, created_at) plus a denormalized
-  `users.petals` updated **atomically in the same SQL transaction**
-  (`UPDATE … SET petals = petals + $delta WHERE id=$id AND petals + $delta >= 0
-  RETURNING petals`). A spend that would go negative fails the row condition →
-  return "insufficient" without mutating.
-- Make every economy entry point (`awardPetals`, `spendPetals`, daily, pool/jukebox
-  spend, item grant) go through this single transactional path with an idempotency
-  key (`ref_id`) so retries can't double-apply.
-- Add concurrency tests: N parallel awards + spends end at the arithmetically
-  correct balance; a duplicated request with the same `ref_id` applies once.
+## O8 — Horizontal-scale readiness · ✅ Done
+Socket.IO Redis adapter + Redis-backed rate limiter.
 
-**Acceptance**
-- [ ] 100 concurrent ±petal operations end at the exact expected balance (test).
-- [ ] Replaying an economy op with the same idempotency key does not double-apply.
-- [ ] Balance can never go negative; ledger sum == `users.petals` (invariant test).
+## O9 — Cosmetic shop · 🟡 Partial → see O19
+Shop route/service/UI exist. Verify purchases go through the O2 ledger with
+idempotency and that equip/ownership is enforced server-side.
 
-## O3 — Eliminate write-on-read amplification
-**Area:** performance/correctness · **Depends on:** O1
-**Why:** `readUser` performs a full `saveUser` (3–5 `SET`+`PERSIST`) on **every
-read** (`UserService.ts` ~L287–293). Every `findById` rewrites the whole user 3×,
-hammering the store and widening the O2 race window.
+## O10 — Progression & return loop · 🔴 Open → see O16
+Only daily presence exists.
 
-**Tasks**
-- Reads must not write. Remove the implicit `saveUser` from the read path; apply
-  defaults in memory only. Persist solely on explicit mutations.
-- Audit hot paths (socket move/interact handlers) for redundant `findById` calls;
-  cache the authenticated user per request/connection where safe.
+## O11 — Social graph · 🟡 Partial → see O20
+Friends + presence exist; whispers/DMs do not.
 
-**Acceptance**
-- [ ] A profile read issues zero writes (verified via a spy/mock or query log).
-- [ ] No behavior regression in auth/economy tests.
+## O12 — More social surfaces · 🟡 Partial → see O21
+Private rooms done; a new mini-game and events/leaderboards do not exist.
 
-## O4 — Server-authoritative pool outcomes
-**Area:** game integrity · **Why:** the client simulates physics and sends final
-ball positions via `pool-sync`; the server derives `finished`/winner from the
-client-supplied diff (`apps/server/src/socket/handlers/poolHandler.ts` +
-`apps/client/src/ui/PoolOverlay.tsx`). A client can declare any result. Today pool
-is a petal *sink* (not a faucet), so this is integrity/fairness — but it must be
-fixed before any match reward, ranking, or wager is added.
-
-**Tasks**
-- Move the authoritative shot resolution server-side: given the validated shot
-  (`angle/power/spin`) and the stored pre-shot ball state, run the **same
-  deterministic physics** (extract the stepper into `packages/shared` so client and
-  server share one implementation) and compute the resulting balls + outcome on the
-  server. The client animates; the server decides.
-- Reject `pool-sync` as the source of truth; at most accept it as a presentation
-  hint reconciled against the server result. Validate it is the shooter's turn and
-  bound potted-per-shot.
-- Unit-test the shared stepper for determinism (same input → same output).
-
-**Acceptance**
-- [ ] A forged `pool-sync` ("all balls pocketed") does **not** win the game.
-- [ ] Server and client converge on the same ball state for a given shot (test).
-- [ ] Out-of-turn / malformed shots are rejected with a coded error + `requestId`.
+## O13 — Decompose UI monoliths · ✅ Done
+HUD split into `ui/hud/*`; pool split into view + canvas renderer.
 
 ---
 
-# P1 — Security, safety, scale
+# Phase 2 — Further objectives (new)
 
-## O5 — Lock down endpoints & add security headers
-**Area:** security · **Why:** `/metrics` is public with no auth
-(`apps/server/src/index.ts` ~L79), leaking operational data; there is no `helmet`
-(no CSP/HSTS/X-Frame-Options) while the server also serves the SPA.
-
-**Tasks**
-- Protect `/metrics` (and any `/api/admin/*`) behind an admin token / allowlist;
-  return 404 publicly. Keep dev affordances dev-only.
-- Add `helmet` with a sensible CSP for the Phaser/React app and LiveKit origins;
-  set HSTS in production. Add an explicit JSON body size limit.
-- Re-verify CORS: production same-origin, dev `CLIENT_URL` only.
-
-**Acceptance**
-- [ ] `/metrics` returns 401/404 without an admin credential.
-- [ ] Security headers present in prod responses (CSP, HSTS, X-Frame-Options).
-- [ ] App still loads and voice still connects under the CSP (verified in-app).
-
-## O6 — Harden authentication & sessions
-**Area:** security · **Why:** `loginOrRegister` conflates login/registration
-(username squatting), min password is **4 chars** (`auth.ts` ~L256); `logout` is a
-no-op so JWTs can't be revoked (`auth.ts` ~L238); Google OAuth has no PKCE and the
-`state` isn't bound to the browser session (`auth.ts` ~L287); legacy socket auth
-lets anyone pick any username with `userId = socket.id`
-(`socketAuth.ts` ~L35).
+## O14 — Finish pool authority: server-side deterministic physics
+**Pri:** P0 · **Area:** game integrity · **Continues:** O4
+**Why:** the server still trusts client-reported ball positions and the `scratched`
+flag (`docs/security/economy.md`, `poolHandler.ts`). Acceptable while pool is a pure
+sink, but it must be closed before any reward/ranking/wager.
 
 **Tasks**
-- Split **register** vs **login**; reject duplicate-username registration with a
-  clear error; raise the password policy (length + basic strength) and rate-limit
-  per account, not just per IP.
-- Introduce refresh tokens + short-lived access tokens, or a server-side session/
-  token-version so `logout` and "log out everywhere" actually revoke. Persist
-  revocation (DB/Redis) checked on socket connect and protected routes.
-- OAuth: add PKCE and bind `state` to a signed, http-only cookie nonce; reject
-  mismatches.
-- Gate legacy socket auth strictly behind a non-production flag and document it;
-  ensure it can never grant a persistent identity in prod.
+- Extract the physics stepper from `apps/client/src/ui/poolCanvasRenderer.ts` /
+  `PoolOverlay` into a **pure, deterministic module in `packages/shared`** (fixed
+  timestep, integer/seeded math — no `Math.random`, no wall-clock).
+- On `pool-shot`, the server runs that stepper from the stored pre-shot state and
+  the validated shot, computing authoritative final balls + scratch + pots itself.
+  `pool-sync` becomes a presentation hint only (already partly true).
+- Unit-test determinism (same input → identical output) on client and server.
 
 **Acceptance**
-- [ ] Registering an existing username fails; weak passwords are rejected.
-- [ ] After logout, the old token is rejected by API and socket.
-- [ ] OAuth callback with a mismatched/absent state cookie is rejected.
-- [ ] Legacy username auth is impossible when `NODE_ENV=production`.
+- [ ] A forged `pool-sync` cannot change the outcome (extends `poolAuthority.test.ts`).
+- [ ] Server-computed and client-rendered final states match for a battery of shots.
+- [ ] No `Math.random`/clock reads in the shared stepper.
 
-## O7 — Moderation & safety suite (pre-launch, non-optional)
-**Area:** trust & safety · **Why:** it's a consumer voice + text product with
-**no** report/block (only local mute), no server-side chat filtering, no age gate,
-no audit. This is an existential/legal risk before real users share a voice room.
+## O15 — Complete the safety suite (launch-blocking)
+**Pri:** P1 · **Area:** trust & safety · **Continues:** O7
+**Why:** a consumer voice+chat product cannot open to the public with only
+block/report. Missing pieces are legal/operational risk.
 
 **Tasks**
-- Persistent **report** and **block** (block hides chat + mutes voice + prevents
-  room co-presence where feasible); store reports with context for review.
-- Server-side chat moderation: profanity/abuse filter + rate-limit + max length
-  (sanitize to prevent any HTML/script injection in the HUD).
-- Room controls: mute/kick (host or trust-role), and a global ban list checked on
-  connect. Append-only **audit log** of moderation actions.
-- Age gate at signup + a minimal ToS/consent record.
+- **Age gate + ToS/consent** recorded at signup (timestamp + version).
+- **Room moderation:** host (or trust-role) **mute/kick**; a **global ban list**
+  enforced on socket connect (reject banned users) and on room join.
+- Wire `moderateChatText` into **every** inbound chat/whisper path; enforce length +
+  rate limit; guarantee no raw HTML reaches the HUD.
+- Minimal **report-review** surface (admin-only) listing `moderation_reports` with
+  status transitions.
 
 **Acceptance**
-- [ ] A blocked user's messages/voice never reach the blocker; persists across sessions.
-- [ ] Disallowed chat content is filtered/rejected server-side; no raw HTML renders.
-- [ ] Reports and moderation actions are persisted and queryable.
+- [ ] Banned user cannot connect; kicked user leaves the room immediately.
+- [ ] Every chat path is filtered; a scripted XSS payload renders inert.
+- [ ] Signup without age/ToS acceptance is rejected and recorded when accepted.
 
-## O8 — Horizontal-scale readiness
-**Area:** scalability · **Why:** there is no Socket.IO Redis adapter and rate
-limiters are in-memory (`apps/server/src/utils/rateLimit.ts`), so the system is
-single-instance: two nodes share neither sockets nor limits, and a restart drops
-presence + rate-limit state. Hard ceiling for an "always-open tab" product.
+## O16 — Progression & return loop
+**Pri:** P2 · **Area:** retention · **Implements:** O10
+**Why:** nothing rewards coming back beyond chat; the petal economy has a faucet
+and (now) a shop sink but no progression.
 
 **Tasks**
-- Add `@socket.io/redis-adapter` (reuse the existing ioredis client) so rooms/
-  broadcasts work across instances; verify interest broadcasting still holds.
-- Move rate limiting to a shared Redis-backed limiter (atomic `INCR`+`EXPIRE` or a
-  token-bucket Lua script) keyed consistently with today's buckets.
-- Make presence/room cleanup robust to multi-instance and restarts (TTL + reconcile
-  on (re)connect).
+- XP/levels from activity, **daily quests**, and a presence **streak** with
+  escalating rewards — all server-authoritative and **ledgered** (reuse O2).
+- Cooldown/anti-farm guards mirroring the petal cooldown pattern.
+- Surface level/streak/quest progress in the HUD; notify on milestones.
 
 **Acceptance**
-- [ ] Two server instances behind a load balancer share rooms, broadcasts, and limits.
-- [ ] Killing one instance doesn't desync presence or reset another's rate limits.
+- [ ] Quests/streaks award via the ledger and cannot be farmed past cooldowns.
+- [ ] Progress persists across sessions and is shown in the HUD.
 
----
-
-# P2 — Retention features & code quality
-
-## O9 — Cosmetic shop (the missing petal sink)
-**Area:** product/economy · **Depends on:** O1–O2
-**Why:** petals are earned (flowers + daily) but buy nothing permanent — the avatar
-customizes for free. The currency has no meaningful sink, so it has no pull.
+## O17 — DB-backed CI + formal migrations
+**Pri:** P0 · **Area:** correctness/ops
+**Why:** the economy now depends on Postgres, but CI (`.github/workflows/ci.yml`)
+runs with `REDIS_MOCK=true` and likely **no Postgres**, so the ledger/transaction
+paths aren't exercised in CI. Schema management also needs to be reproducible.
 
 **Tasks**
-- Define a catalog of unlockable cosmetics (avatar parts, emotes, titles, room
-  decorations) with petal prices in `packages/shared`.
-- Server-authoritative purchase flow (spend via the O2 ledger, idempotent), writing
-  to `unlockedItems`; equip/unequip persisted on the profile.
-- Client shop UI + "owned/equipped" states; gate avatar parts behind ownership.
+- Add a `postgres` service to the CI workflow; run the DB-backed `UserService`/
+  ledger/moderation/social tests against it.
+- Formalize migrations: a numbered migration dir + `pnpm --filter server migrate`
+  (or `node-pg-migrate`); `init.sql` becomes `0001`. Document the
+  `import:redis-users` cutover and add a test for it.
+- Add an integration test asserting the **ledger invariant** (`SUM(delta) == users.petals`).
 
 **Acceptance**
-- [ ] Buying a cosmetic atomically spends petals and unlocks it; double-click can't
-      double-charge.
-- [ ] Equipped cosmetics persist across sessions and render for remote players.
+- [ ] CI provisions Postgres and the DB-backed suites run (and pass) there.
+- [ ] `migrate` builds the schema from empty reproducibly; invariant test passes.
 
-## O10 — Progression & return loop
-**Area:** retention · **Why:** nothing rewards coming back beyond the chat itself.
+## O18 — Frontend performance: code-split Phaser/LiveKit
+**Pri:** P1 · **Area:** performance
+**Why:** the production build warns chunks exceed 500 kB; `phaser` (~1.48 MB) and
+`livekit` (~506 kB) ship eagerly — bad first load for an "always-open tab".
+
 **Tasks**
-- XP/levels from activity, daily quests, and a presence **streak** with escalating
-  rewards (server-authoritative, ledger-backed).
-- Surface progress in the HUD; notify on level-up / streak milestones.
+- Lazy-load LiveKit/voice via dynamic `import()` (only when voice is enabled).
+- Configure `build.rollupOptions.output.manualChunks` to split vendors; verify the
+  CSP from O5 permits the media/worker origins LiveKit needs.
+- Record before/after gzip sizes; add a bundle-size budget note.
 
 **Acceptance**
-- [ ] Quests/streaks award via the ledger; can't be farmed past their cooldowns.
-- [ ] Progress persists and is shown in the HUD.
+- [ ] No eager chunk > ~700 kB except unavoidable Phaser core; LiveKit loads on demand.
+- [ ] App + voice work end-to-end under the production CSP.
 
-## O11 — Social graph (friends, presence, whispers)
-**Area:** product · **Why:** a *social* space where you can't refind a person.
+## O19 — Wallet & shop observability + reconciliation
+**Pri:** P1 · **Area:** economy ops · **Continues:** O2/O9
+**Why:** with a ledger in place, add the guardrails and analytics it unlocks.
+
 **Tasks**
-- Friends/follow with requests + accept; online presence for friends; "join friend".
-- Private whispers/DMs (subject to O7 block rules).
+- Confirm **every** shop purchase spends via the O2 ledger with an idempotency key;
+  enforce ownership/equip server-side (no client-granted cosmetics).
+- Add a periodic/admin **reconciliation** check (ledger sum vs balance) that alerts
+  on drift; expose economy counters via the admin `/metrics`.
+- Add ledger-derived analytics (faucet vs sink per source) behind admin auth.
 
 **Acceptance**
-- [ ] Add/accept a friend; see their online status; jump to their room.
-- [ ] Whispers respect blocks and chat moderation.
+- [ ] Purchases are idempotent and ownership is server-enforced (tests).
+- [ ] A seeded drift is detected by the reconciliation check.
 
-## O12 — More social surfaces (private rooms / mini-games / events)
-**Area:** product · **Why:** the architecture already supports multiple interactive
-objects and rooms; expand the reasons to gather. *Scope per PR — pick one.*
-**Tasks (choose one per objective slice)**
-- **Private/instanced rooms** with invite codes (party with friends).
-- **One new mini-game** reusing the pool/jukebox interaction pattern (darts, cards),
-  with shared, server-authoritative rule logic.
-- **Timed events + leaderboards** with limited-time cosmetics.
-
-**Acceptance**
-- [ ] The chosen surface works end-to-end, server-authoritative where money/score
-      is involved, with tests for the shared logic.
-
-## O13 — Decompose UI monoliths
-**Area:** maintainability · **Why:** `apps/client/src/ui/HUD.tsx` (~1392 lines),
-`apps/client/src/ui/PoolOverlay.tsx` (~891), `apps/client/src/world/SectorRenderer.ts`
-(~750) concentrate too much, mirroring the now-fixed server monolith.
+## O20 — Whispers/DMs + presence polish
+**Pri:** P2 · **Area:** product · **Continues:** O11
 **Tasks**
-- Split `HUD.tsx` into focused components/hooks (top bar, action bar, modals,
-  per-feature panels). Same for `PoolOverlay` (view vs. render vs. input).
-- Pure refactor; rely on tests + in-app verification for parity.
+- Direct messages/whispers between users, subject to O7/O15 block + moderation.
+- Friend presence (online/room) and "join friend"; basic unread indicators.
 
 **Acceptance**
-- [ ] No UI file exceeds ~500 lines; behavior unchanged; build + tests green.
+- [ ] Whispers deliver only when not blocked and are moderated; offline handling defined.
+- [ ] Friend presence updates live; "join friend" lands in their room.
+
+## O21 — New mini-game + events/leaderboards
+**Pri:** P2 · **Area:** product · **Continues:** O12 · **Depends on:** O14 pattern
+**Tasks**
+- One new mini-game reusing the interaction pattern, with **server-authoritative**
+  shared rule logic (follow the O14 model) and tests.
+- Timed events + leaderboards with limited-time cosmetics (ledgered rewards).
+
+**Acceptance**
+- [ ] The new game is server-authoritative where score/petals are involved.
+- [ ] Leaderboards/events are persisted and reset on schedule.
 
 ---
 
@@ -323,9 +275,10 @@ failed before. Diff scoped to the objective. PR body lists what was verified.
 - **Petal collection** is optimistic and reconciled by absolute totals; every
   server reply/error for `petal-collect` carries a `requestId`; pending collects
   self-heal via timeout and per-point retry cooldown. Don't regress this.
-- **Pool rule logic** is pure and lives in `packages/shared`; after O4 the physics
+- **Pool rule logic** is pure and lives in `packages/shared`; after O14 the physics
   stepper is shared and the **server** is authoritative for outcomes.
-- **Redis mock** (`REDIS_MOCK=true`) keeps the server bootable without real Redis
-  for tests/local dev. After O1, Redis holds only ephemeral state — never the wallet.
+- **Redis** holds only ephemeral state (presence, room/object state, cooldowns,
+  rate limits) — **never** the wallet. `REDIS_MOCK=true` keeps the server bootable
+  for tests/local dev.
 - **Economy goes through one transactional, idempotent, ledgered path** (O2). No
-  handler may mutate `petals` directly.
+  handler may mutate `petals` directly; shop/quests/events reuse it.
