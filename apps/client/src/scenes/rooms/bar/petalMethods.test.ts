@@ -70,7 +70,7 @@ function petalContext() {
     _showNotice: vi.fn(),
     _createPetalBloom: vi.fn((position: Position) => ({ position, station: { destroy: vi.fn() } })),
     _isNear: vi.fn(() => true),
-    _syncPetalPositionForServer: vi.fn(),
+    _syncPetalPositionForServer: vi.fn(() => ({ x: 3, y: 35 })),
     _network: { emitInteract: vi.fn() },
     worldMap: { getTile: vi.fn(() => ({ walkable: true })) },
   };
@@ -153,13 +153,15 @@ describe('petal collection timing', () => {
     } as unknown as PetalBloom;
 
     collectPetalBloom.call(ctx, bloom);
-    const firstRequestId = ctx._network.emitInteract.mock.calls[0][2].requestId;
+    const firstPayload = ctx._network.emitInteract.mock.calls[0][2];
+    const firstRequestId = firstPayload.requestId;
     ctx._pendingPetalCollects.clear();
     ctx._petalAttemptCooldowns.clear();
     collectPetalBloom.call(ctx, bloom);
     const secondRequestId = ctx._network.emitInteract.mock.calls[1][2].requestId;
 
     expect(firstRequestId).not.toBe(petalPointKey(TEST_PETAL_POINT));
+    expect(firstPayload).toMatchObject({ playerX: 3, playerY: 35 });
     expect(secondRequestId).not.toBe(firstRequestId);
   });
 

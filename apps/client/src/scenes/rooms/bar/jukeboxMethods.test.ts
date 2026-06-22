@@ -36,6 +36,8 @@ describe('jukebox interactions', () => {
       expect.objectContaining({
         url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
         requestId: expect.stringMatching(/^jukebox-play-url:/),
+        playerX: 16,
+        playerY: 3,
       }),
     );
     expect(ctx._network.emitMove.mock.invocationCallOrder[0]).toBeLessThan(

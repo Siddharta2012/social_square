@@ -182,11 +182,12 @@ export function collectPetalBloom(this: any, bloom: PetalBloom, automatic = fals
     pointKey,
     now + Math.max(PETAL_RETRY_COOLDOWN_MS, config.intervalMs),
   );
-  this._syncPetalPositionForServer();
+  const local = this._syncPetalPositionForServer();
   this._network?.emitInteract(PETAL_BLOOM_OBJECT_ID, 'petal-collect', {
     x: bloom.position.x,
     y: bloom.position.y,
     requestId,
+    ...(local ? { playerX: local.x, playerY: local.y } : {}),
   });
 }
 
@@ -224,9 +225,9 @@ export function removePetalBloom(this: any, bloom: PetalBloom): void {
   bloom.station.destroy();
 }
 
-export function syncPetalPositionForServer(this: any): void {
+export function syncPetalPositionForServer(this: any): Position | null {
   const local = this._localPosition();
-  if (!local) return;
+  if (!local) return null;
   this._network?.emitMove(
     local.x,
     local.y,
@@ -234,6 +235,7 @@ export function syncPetalPositionForServer(this: any): void {
     this.movementSystem.isMoving ? 'walk' : 'idle',
     true,
   );
+  return local;
 }
 
 export function rollbackPendingPetalCollect(

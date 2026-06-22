@@ -15,7 +15,10 @@ import { state, userService, type IoServer, type IoSocket } from './roomContext'
 import { ensureUserNear, isSafeEventText } from './roomUtils';
 import type { JukeboxState, ObjectState } from '@social-square/shared';
 
-function isActiveJukebox(state: ReturnType<typeof normalizeJukeboxState>, now = Date.now()): boolean {
+function isActiveJukebox(
+  state: ReturnType<typeof normalizeJukeboxState>,
+  now = Date.now(),
+): boolean {
   return state.playing && (state.expiresAt === null || state.expiresAt > now);
 }
 
@@ -53,6 +56,7 @@ export async function handleJukeboxInteraction(
     userId,
     JUKEBOX_POSITION,
     'Avvicinati al jukebox',
+    payload,
   );
   if (!listener) return;
 
@@ -90,9 +94,7 @@ export async function handleJukeboxInteraction(
     };
     requiresPayment = true;
   } else if (action === 'jukebox-play-track') {
-    const trackId = isJukeboxTrackId(payload.trackId)
-      ? payload.trackId
-      : current.trackId;
+    const trackId = isJukeboxTrackId(payload.trackId) ? payload.trackId : current.trackId;
     next = {
       ...current,
       trackId,
@@ -136,15 +138,26 @@ export async function handleJukeboxInteraction(
       requestId ? `jukebox:${requestId}` : undefined,
     );
     if (!paidUser) {
-      socket.emit('error', { code: 'INSUFFICIENT_PETALS', message: `Servono ${JUKEBOX_PLAY_COST} petali` });
+      socket.emit('error', {
+        code: 'INSUFFICIENT_PETALS',
+        message: `Servono ${JUKEBOX_PLAY_COST} petali`,
+      });
       return;
     }
     socket.emit('account-updated', { petals: paidUser.petals, stats: { ...paidUser.stats } });
     next = withJukeboxHistory(next, username, now);
     economyEvent();
-    logInfo('economy.spend', { userId, source: 'jukebox', amount: JUKEBOX_PLAY_COST, petals: paidUser.petals });
+    logInfo('economy.spend', {
+      userId,
+      source: 'jukebox',
+      amount: JUKEBOX_PLAY_COST,
+      petals: paidUser.petals,
+    });
   }
 
   await state.updateObjectState(roomId, objectId, next as unknown as ObjectState);
-  await emitObjectStateChangedToInterested(io, roomId, { objectId, state: next as unknown as ObjectState });
+  await emitObjectStateChangedToInterested(io, roomId, {
+    objectId,
+    state: next as unknown as ObjectState,
+  });
 }

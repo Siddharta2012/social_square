@@ -7,7 +7,12 @@ import { logInfo, logWarn } from '../../utils/logger';
 import { economyEvent } from '../../utils/metrics';
 import { socketRateLimiter } from '../../utils/rateLimit';
 import { state, userService, type IoSocket } from './roomContext';
-import { currentRoomUser, isSafeEventText, locationIdFor, socketRateKey } from './roomUtils';
+import {
+  currentRoomUserForInteraction,
+  isSafeEventText,
+  locationIdFor,
+  socketRateKey,
+} from './roomUtils';
 import type { ObjectState } from '@social-square/shared';
 
 const PETAL_SERVER_COLLECT_RADIUS_TILES = 1.6;
@@ -47,14 +52,14 @@ export async function handlePetalInteraction(
     return;
   }
 
-  const roomUser = await currentRoomUser(roomId, userId);
+  const roomUser = await currentRoomUserForInteraction(roomId, userId, payload);
   if (!roomUser) return;
   const locationId = locationIdFor(roomUser.position);
   const config = petalSpawnConfigForLocation(locationId);
-  const point = config?.points.find((candidate) => (
-    Math.round(candidate.x) === Math.round(x) &&
-    Math.round(candidate.y) === Math.round(y)
-  ));
+  const point = config?.points.find(
+    (candidate) =>
+      Math.round(candidate.x) === Math.round(x) && Math.round(candidate.y) === Math.round(y),
+  );
   if (!config || !point) {
     emitPetalError('INVALID_PETAL', 'Fiore non disponibile qui');
     return;
@@ -92,5 +97,11 @@ export async function handlePetalInteraction(
     progress: progressUpdate?.progress,
   });
   economyEvent();
-  logInfo('economy.award', { userId, source: 'flower', amount: config.value, petals: accountUser.petals, locationId });
+  logInfo('economy.award', {
+    userId,
+    source: 'flower',
+    amount: config.value,
+    petals: accountUser.petals,
+    locationId,
+  });
 }

@@ -349,8 +349,8 @@ export class BarScene extends BaseRoomScene {
     petalMethods.removePetalBloom.call(this, bloom);
   }
 
-  private _syncPetalPositionForServer(): void {
-    petalMethods.syncPetalPositionForServer.call(this);
+  private _syncPetalPositionForServer(): Position | null {
+    return petalMethods.syncPetalPositionForServer.call(this);
   }
 
   private _rollbackPendingPetalCollect(requestId: string | undefined, message: string): void {

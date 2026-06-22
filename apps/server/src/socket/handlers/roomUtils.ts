@@ -19,7 +19,15 @@ import type {
 import type { z } from 'zod';
 
 const EMOTE_IDS = new Set<EmoteId>(['wave', 'dance', 'clap']);
-const AVATAR_STATES = new Set<AvatarState>(['idle', 'walk', 'sit', 'wave', 'dance', 'clap', 'fish']);
+const AVATAR_STATES = new Set<AvatarState>([
+  'idle',
+  'walk',
+  'sit',
+  'wave',
+  'dance',
+  'clap',
+  'fish',
+]);
 
 export const DIRECTIONS = new Set<number>(
   Object.values(Direction).filter((value): value is number => typeof value === 'number'),
@@ -72,6 +80,27 @@ export async function currentRoomUser(roomId: string, userId: string): Promise<R
   return roomState.users.find((user) => user.userId === userId) ?? null;
 }
 
+function positionHintFromPayload(payload: ObjectState | undefined): Position | null {
+  const x = payload?.playerX;
+  const y = payload?.playerY;
+  if (typeof x !== 'number' || typeof y !== 'number') return null;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+}
+
+export async function currentRoomUserForInteraction(
+  roomId: string,
+  userId: string,
+  payload?: ObjectState,
+): Promise<RoomUser | null> {
+  const user = await currentRoomUser(roomId, userId);
+  if (!user) return null;
+  const hintedPosition = positionHintFromPayload(payload);
+  if (!hintedPosition) return user;
+  await state.updatePosition(roomId, userId, hintedPosition);
+  return { ...user, position: hintedPosition };
+}
+
 export function emitTooFar(socket: IoSocket, message: string): void {
   socket.emit('error', { code: 'TOO_FAR', message });
 }
@@ -80,7 +109,12 @@ export function socketRateKey(socket: IoSocket, bucket: string): string {
   return `socket:${bucket}:${socket.data.userId}:${socket.id}`;
 }
 
-export async function hitSocketRate(socket: IoSocket, bucket: string, limit: number, windowMs: number): Promise<boolean> {
+export async function hitSocketRate(
+  socket: IoSocket,
+  bucket: string,
+  limit: number,
+  windowMs: number,
+): Promise<boolean> {
   const result = await socketRateLimiter.hitShared(socketRateKey(socket, bucket), limit, windowMs);
   if (result.allowed) return true;
   socket.emit('error', { code: 'RATE_LIMIT', message: 'Troppe azioni, rallenta un attimo' });
@@ -112,15 +146,22 @@ function safeAvatarPart(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 }
 
-export function sanitizeAvatarConfig(value: unknown, userId: string, username: string): AvatarConfig {
-  const raw = value && typeof value === 'object' ? value as Partial<AvatarConfig> : {};
+export function sanitizeAvatarConfig(
+  value: unknown,
+  userId: string,
+  username: string,
+): AvatarConfig {
+  const raw = value && typeof value === 'object' ? (value as Partial<AvatarConfig>) : {};
   return {
     userId,
     username,
     body: safeAvatarPart(raw.body),
     outfit: safeAvatarPart(raw.outfit),
     hair: safeAvatarPart(raw.hair),
-    hairColor: typeof raw.hairColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw.hairColor) ? raw.hairColor : '#4488ff',
+    hairColor:
+      typeof raw.hairColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw.hairColor)
+        ? raw.hairColor
+        : '#4488ff',
     accessory: safeAvatarPart(raw.accessory),
     expression: safeAvatarPart(raw.expression),
   };
@@ -144,8 +185,9 @@ export async function ensureUserNear(
   userId: string,
   target: Position,
   message: string,
+  payload?: ObjectState,
 ): Promise<RoomUser | null> {
-  const user = await currentRoomUser(roomId, userId);
+  const user = await currentRoomUserForInteraction(roomId, userId, payload);
   if (!user || !isWithinInteractionRange(user.position, target, INTERACTION_RADIUS_TILES)) {
     emitTooFar(socket, message);
     return null;
@@ -153,7 +195,11 @@ export async function ensureUserNear(
   return user;
 }
 
-export async function persistUserPosition(userId: string, roomId: string, position: Position): Promise<void> {
+export async function persistUserPosition(
+  userId: string,
+  roomId: string,
+  position: Position,
+): Promise<void> {
   await userService.updatePosition(userId, {
     roomId,
     x: position.x,
@@ -163,7 +209,11 @@ export async function persistUserPosition(userId: string, roomId: string, positi
   });
 }
 
-export async function savedSpawnFor(userId: string, roomId: string, fallback: Position): Promise<Position> {
+export async function savedSpawnFor(
+  userId: string,
+  roomId: string,
+  fallback: Position,
+): Promise<Position> {
   const user = await userService.findById(userId);
   if (!user?.position || user.position.roomId !== roomId) return fallback;
   return { x: user.position.x, y: user.position.y };

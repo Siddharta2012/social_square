@@ -4,6 +4,7 @@ import {
   jukeboxTitle,
   normalizeJukeboxState,
   parseJukeboxExternalTrack,
+  type Position,
 } from '@social-square/shared';
 import { t } from '../../../i18n';
 import { useGameStore } from '../../../store/gameStore';
@@ -33,9 +34,10 @@ export function requestJukeboxToggle(this: any): void {
     return;
   }
 
-  syncJukeboxPositionForServer.call(this);
+  const local = syncJukeboxPositionForServer.call(this);
   this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-toggle', {
     requestId: requestId('jukebox-toggle'),
+    ...(local ? { playerX: local.x, playerY: local.y } : {}),
   });
 }
 
@@ -59,9 +61,10 @@ export function requestJukeboxNext(this: any): void {
     return;
   }
 
-  syncJukeboxPositionForServer.call(this);
+  const local = syncJukeboxPositionForServer.call(this);
   this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-next', {
     requestId: requestId('jukebox-next'),
+    ...(local ? { playerX: local.x, playerY: local.y } : {}),
   });
 }
 
@@ -91,10 +94,11 @@ export function requestJukeboxPlayUrl(this: any, url: string): void {
     return;
   }
 
-  syncJukeboxPositionForServer.call(this);
+  const local = syncJukeboxPositionForServer.call(this);
   this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-play-url', {
     url,
     requestId: requestId('jukebox-play-url'),
+    ...(local ? { playerX: local.x, playerY: local.y } : {}),
   });
 }
 
@@ -150,9 +154,9 @@ export function syncJukeboxExpiry(this: any): void {
   void this._applyJukeboxState(normalized);
 }
 
-export function syncJukeboxPositionForServer(this: any): void {
+export function syncJukeboxPositionForServer(this: any): Position | null {
   const local = this._localPosition();
-  if (!local) return;
+  if (!local) return null;
   this._network?.emitMove(
     local.x,
     local.y,
@@ -160,4 +164,5 @@ export function syncJukeboxPositionForServer(this: any): void {
     this.movementSystem.isMoving ? 'walk' : 'idle',
     true,
   );
+  return local;
 }
