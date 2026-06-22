@@ -157,6 +157,10 @@ export class JukeboxPlayer {
     this._audio?.pause();
     this._audio = null;
     this._disconnectAudioGraph();
+    if (this._audioContext && this._audioContext.state !== 'closed') {
+      void this._audioContext.close().catch(() => undefined);
+    }
+    this._audioContext = null;
     this._hideExternalPlayer();
     for (const url of this._urls.values()) URL.revokeObjectURL(url);
     this._urls.clear();
