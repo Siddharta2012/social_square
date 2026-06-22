@@ -77,6 +77,15 @@ function petalContext() {
   };
 }
 
+function makeBloomAt(ctx: ReturnType<typeof petalContext>, position: Position): PetalBloom {
+  const bloom: PetalBloom = {
+    position: { ...position },
+    station: { destroy: vi.fn() } as unknown as import('../../../entities/InteractStation').InteractStation,
+  };
+  ctx._petalBlooms.push(bloom);
+  return bloom;
+}
+
 describe('petal collection timing', () => {
   beforeEach(() => {
     useGameStore.setState({ petals: 0 });
@@ -183,5 +192,60 @@ describe('petal collection timing', () => {
     expect(ctx._petalBlooms.some((bloom) => petalPointKey(bloom.position) === pointKey)).toBe(
       false,
     );
+  });
+});
+
+describe('optimistic petal lifecycle invariants', () => {
+  beforeEach(() => {
+    useGameStore.setState({ petals: 0 });
+  });
+
+  it('second collect of the same bloom is a no-op (guards double-collect)', () => {
+    const ctx = petalContext();
+    const bloom = makeBloomAt(ctx, TEST_PETAL_POINT);
+    // Mock the network emit so we can track calls
+    const emitInteract = vi.fn();
+    ctx._network = { emitInteract, emitMove: vi.fn() } as any;
+
+    collectPetalBloom.call(ctx as unknown as BarSceneContext, bloom, true);
+    const sizeAfterFirst = ctx._pendingPetalCollects.size;
+    // bloom is now removed; calling again with the same bloom object should be a no-op
+    collectPetalBloom.call(ctx as unknown as BarSceneContext, bloom, true);
+    expect(ctx._pendingPetalCollects.size).toBe(sizeAfterFirst); // still 1
+    expect(emitInteract).toHaveBeenCalledTimes(1); // only emitted once
+  });
+
+  it('error rollback restores optimistic petal credit and re-shows the bloom', () => {
+    const ctx = petalContext();
+    ctx._network = { emitInteract: vi.fn(), emitMove: vi.fn() } as any;
+    useGameStore.getState().setPetals(0);
+    const bloom = makeBloomAt(ctx, TEST_PETAL_POINT);
+
+    collectPetalBloom.call(ctx as unknown as BarSceneContext, bloom, true);
+    const reqId = [...ctx._pendingPetalCollects.keys()][0];
+    const creditedAmount = useGameStore.getState().petals;
+    expect(creditedAmount).toBeGreaterThan(0); // optimistic credit was applied
+
+    rollbackPendingPetalCollect.call(ctx as unknown as BarSceneContext, reqId, 'TOO_FAR');
+    expect(useGameStore.getState().petals).toBeLessThan(creditedAmount); // credit removed
+    // Bloom should be restored at the original position
+    expect(
+      ctx._petalBlooms.some((b) => petalPointKey(b.position) === petalPointKey(TEST_PETAL_POINT)),
+    ).toBe(true);
+  });
+
+  it('confirm with stale/unknown requestId still sets petals from server total', () => {
+    const ctx = petalContext();
+    useGameStore.getState().setPetals(0);
+    // No pending collects at all — simulates a late server reply after client reset
+    confirmPetalCollected.call(
+      ctx as unknown as BarSceneContext,
+      TEST_PETAL_POINT,
+      25,
+      999,
+      'nonexistent-req',
+    );
+    // Server said total is 999; pending is 0; so store should reflect ≥999
+    expect(useGameStore.getState().petals).toBeGreaterThanOrEqual(999);
   });
 });
