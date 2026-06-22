@@ -51,6 +51,28 @@ describe('UserService Google auth persistence', () => {
     expect(result.user.tosAcceptedAt).toBe(consent.tosAcceptedAt);
   });
 
+  it('links a matching password account to Google without creating a duplicate', async () => {
+    const service = new UserService(new MemoryUserRepository());
+    const username = `link-${randomUUID()}`;
+    const email = `${username}@example.test`;
+    const passwordUser = await service.createPasswordUser(username, 'Password123');
+
+    const result = await service.loginOrCreateGoogleUser({
+      sub: `google-link-${randomUUID()}`,
+      email,
+      name: 'Linked Tester',
+    });
+
+    expect(result.isNew).toBe(false);
+    expect(result.user.userId).toBe(passwordUser.userId);
+    expect(result.user.provider).toBe('google');
+    expect(result.user.googleSub).toMatch(/^google-link-/);
+    await expect(service.findByEmail(email)).resolves.toMatchObject({
+      userId: passwordUser.userId,
+      googleSub: result.user.googleSub,
+    });
+  });
+
   it('increments token version when sessions are revoked', async () => {
     const service = new UserService(new MemoryUserRepository());
     const sub = `logout-${randomUUID()}`;

@@ -18,14 +18,12 @@ import {
 } from '@social-square/shared';
 import bcrypt from 'bcryptjs';
 import { query, withTransaction } from '../config/database';
-import { redis } from '../config/redis';
-import { logInfo, logWarn } from '../utils/logger';
+import { logWarn } from '../utils/logger';
 import type { AvatarConfig, Position, ProgressActivity, UserProgressSnapshot } from '@social-square/shared';
 import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 const SALT_ROUNDS = 10;
 const STARTING_PETALS = 0;
-const LEGACY_USER_PREFIX = 'user';
 
 export interface StoredProfilePosition extends Position {
   roomId: string;
@@ -85,7 +83,7 @@ export interface StoredUser {
 
 export type PetalAwardSource = 'flower' | 'daily' | 'event' | 'task' | 'admin';
 export type PetalSpendSource = 'counter' | 'waiter' | 'jukebox' | 'pool' | 'cosmetic' | 'admin';
-export type PetalLedgerReason = PetalAwardSource | PetalSpendSource | 'legacy-import';
+export type PetalLedgerReason = PetalAwardSource | PetalSpendSource;
 
 export interface WalletMutation {
   userId: string;
@@ -202,24 +200,6 @@ function defaultStats(raw: Partial<StoredUserStats> | undefined): StoredUserStat
     lastPetalCollectAt: typeof raw?.lastPetalCollectAt === 'number' ? raw.lastPetalCollectAt : 0,
     lastDailyPresenceAt: typeof raw?.lastDailyPresenceAt === 'number' ? raw.lastDailyPresenceAt : 0,
     lastSeenAt: typeof raw?.lastSeenAt === 'number' ? raw.lastSeenAt : Date.now(),
-  };
-}
-
-function mergeStatsFloor(current: StoredUserStats, imported: StoredUserStats): StoredUserStats {
-  return {
-    petalsEarned: Math.max(current.petalsEarned, imported.petalsEarned),
-    petalsSpent: Math.max(current.petalsSpent, imported.petalsSpent),
-    flowerPetalsCollected: Math.max(current.flowerPetalsCollected, imported.flowerPetalsCollected),
-    dailyPresenceClaims: Math.max(current.dailyPresenceClaims, imported.dailyPresenceClaims),
-    barEventsCompleted: Math.max(current.barEventsCompleted, imported.barEventsCompleted),
-    miniTasksCompleted: Math.max(current.miniTasksCompleted, imported.miniTasksCompleted),
-    itemsPurchased: Math.max(current.itemsPurchased, imported.itemsPurchased),
-    waiterOrders: Math.max(current.waiterOrders, imported.waiterOrders),
-    jukeboxPlays: Math.max(current.jukeboxPlays, imported.jukeboxPlays),
-    poolPlays: Math.max(current.poolPlays, imported.poolPlays),
-    lastPetalCollectAt: Math.max(current.lastPetalCollectAt, imported.lastPetalCollectAt),
-    lastDailyPresenceAt: Math.max(current.lastDailyPresenceAt, imported.lastDailyPresenceAt),
-    lastSeenAt: Math.max(current.lastSeenAt, imported.lastSeenAt),
   };
 }
 
@@ -631,23 +611,19 @@ export class UserService {
   constructor(private readonly repository: UserRepository = new PostgresUserRepository()) {}
 
   async findByUsername(username: string): Promise<StoredUser | null> {
-    const user = await this.withWalletFloor(await this.repository.findByUsername(username));
-    return this.reconcileLegacyUser(user, await this.findLegacyByUsername(username), 'username');
+    return this.withWalletFloor(await this.repository.findByUsername(username));
   }
 
   async findById(userId: string): Promise<StoredUser | null> {
-    const user = await this.withWalletFloor(await this.repository.findById(userId));
-    return this.reconcileLegacyUser(user, await this.findLegacyById(userId), 'id');
+    return this.withWalletFloor(await this.repository.findById(userId));
   }
 
   async findByGoogleSub(sub: string): Promise<StoredUser | null> {
-    const user = await this.withWalletFloor(await this.repository.findByGoogleSub(sub));
-    return this.reconcileLegacyUser(user, await this.findLegacyByGoogleSub(sub), 'google');
+    return this.withWalletFloor(await this.repository.findByGoogleSub(sub));
   }
 
   async findByEmail(email: string): Promise<StoredUser | null> {
-    const user = await this.withWalletFloor(await this.repository.findByEmail(email));
-    return this.reconcileLegacyUser(user, await this.findLegacyByEmail(email), 'email');
+    return this.withWalletFloor(await this.repository.findByEmail(email));
   }
 
   async createPasswordUser(username: string, password: string, consent?: ConsentRecord): Promise<StoredUser> {
@@ -681,19 +657,18 @@ export class UserService {
       return { user: await this.repository.updateUser(next), isNew: false };
     }
 
-    const legacy = await this.findLegacyUserForGoogle(profile);
-    if (legacy) {
+    const linkable = await this.findLinkablePasswordUserForGoogle(profile);
+    if (linkable) {
       const linked = normalizeUser({
-        ...legacy,
+        ...linkable,
         provider: 'google',
         googleSub: profile.sub,
-        email: profile.email ?? legacy.email,
-        displayName: profile.name ?? legacy.displayName,
-        picture: profile.picture ?? legacy.picture,
-        passwordHash: legacy.passwordHash,
-        migratedFromUserId: legacy.migratedFromUserId ?? legacy.userId,
-        ageConfirmedAt: legacy.ageConfirmedAt ?? consent?.ageConfirmedAt,
-        tosAcceptedAt: legacy.tosAcceptedAt ?? consent?.tosAcceptedAt,
+        email: profile.email ?? linkable.email,
+        displayName: profile.name ?? linkable.displayName,
+        picture: profile.picture ?? linkable.picture,
+        passwordHash: linkable.passwordHash,
+        ageConfirmedAt: linkable.ageConfirmedAt ?? consent?.ageConfirmedAt,
+        tosAcceptedAt: linkable.tosAcceptedAt ?? consent?.tosAcceptedAt,
         updatedAt: Date.now(),
       });
       return { user: await this.repository.updateUser(linked), isNew: false };
@@ -1038,218 +1013,6 @@ export class UserService {
     return (await this.repository.repairWalletFloor(user.userId)) ?? user;
   }
 
-  private shouldImportLegacyRedis(): boolean {
-    return this.repository instanceof PostgresUserRepository;
-  }
-
-  private legacyIdKey(userId: string): string {
-    return `${LEGACY_USER_PREFIX}:id:${userId}`;
-  }
-
-  private legacyBackupKey(userId: string): string {
-    return `${LEGACY_USER_PREFIX}:backup:${userId}`;
-  }
-
-  private legacyUsernameKey(username: string): string {
-    return `${LEGACY_USER_PREFIX}:${username.toLowerCase()}`;
-  }
-
-  private legacyGoogleKey(sub: string): string {
-    return `${LEGACY_USER_PREFIX}:google:${sub}`;
-  }
-
-  private legacyEmailKey(email: string): string {
-    return `${LEGACY_USER_PREFIX}:email:${email.toLowerCase()}`;
-  }
-
-  private async legacyGet(key: string): Promise<string | null> {
-    if (!this.shouldImportLegacyRedis()) return null;
-    try {
-      return await redis.get(key);
-    } catch (err) {
-      logWarn('auth.legacy_redis_lookup_failed', {
-        key,
-        message: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
-  }
-
-  private async legacyUserFromKey(key: string): Promise<Partial<StoredUser> | null> {
-    const raw = await this.legacyGet(key);
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      return parsed && typeof parsed === 'object' ? parsed as Partial<StoredUser> : null;
-    } catch {
-      return null;
-    }
-  }
-
-  private async findLegacyById(userId: string): Promise<Partial<StoredUser> | null> {
-    return (await this.legacyUserFromKey(this.legacyIdKey(userId)))
-      ?? this.legacyUserFromKey(this.legacyBackupKey(userId));
-  }
-
-  private async findLegacyByUsername(username: string): Promise<Partial<StoredUser> | null> {
-    return this.legacyUserFromKey(this.legacyUsernameKey(username.trim()));
-  }
-
-  private async findLegacyByGoogleSub(sub: string): Promise<Partial<StoredUser> | null> {
-    const userId = await this.legacyGet(this.legacyGoogleKey(sub));
-    return userId ? this.findLegacyById(userId) : null;
-  }
-
-  private async findLegacyByEmail(email: string): Promise<Partial<StoredUser> | null> {
-    const userId = await this.legacyGet(this.legacyEmailKey(email));
-    return userId ? this.findLegacyById(userId) : null;
-  }
-
-  private async importLegacyUser(raw: Partial<StoredUser> | null, source: string): Promise<StoredUser | null> {
-    if (!raw || !this.shouldImportLegacyRedis()) return null;
-    const legacy = normalizeUser(raw);
-    const existing = await this.findRepositoryConflict(legacy);
-    try {
-      const imported = existing
-        ? await this.mergeLegacyUser(existing, legacy)
-        : await this.createLegacyUser(legacy);
-      logInfo('auth.legacy_redis_user_imported', {
-        source,
-        userId: imported.userId,
-        legacyUserId: legacy.userId,
-        petals: imported.petals,
-      });
-      return imported;
-    } catch (err) {
-      logWarn('auth.legacy_redis_user_import_failed', {
-        source,
-        userId: legacy.userId,
-        message: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
-  }
-
-  private async reconcileLegacyUser(
-    user: StoredUser | null,
-    raw: Partial<StoredUser> | null,
-    source: string,
-  ): Promise<StoredUser | null> {
-    if (!raw || !this.shouldImportLegacyRedis()) return user;
-    if (!user) return this.importLegacyUser(raw, source);
-
-    const legacy = normalizeUser(raw);
-    const userMatchesLegacy = user.userId === legacy.userId ||
-      (Boolean(user.googleSub) && user.googleSub === legacy.googleSub) ||
-      (Boolean(user.email) && user.email?.toLowerCase() === legacy.email?.toLowerCase()) ||
-      user.username.toLowerCase() === legacy.username.toLowerCase();
-    if (!userMatchesLegacy) return user;
-
-    const shouldMerge = legacy.petals > user.petals ||
-      legacy.unlockedItems.some((item) => !user.unlockedItems.includes(item)) ||
-      (!user.googleSub && Boolean(legacy.googleSub)) ||
-      (!user.email && Boolean(legacy.email)) ||
-      (!user.avatarConfig && Boolean(legacy.avatarConfig));
-    if (!shouldMerge) return user;
-
-    try {
-      const merged = await this.mergeLegacyUser(user, legacy);
-      logInfo('auth.legacy_redis_user_reconciled', {
-        source,
-        userId: merged.userId,
-        legacyUserId: legacy.userId,
-        petals: merged.petals,
-      });
-      return merged;
-    } catch (err) {
-      logWarn('auth.legacy_redis_user_reconcile_failed', {
-        source,
-        userId: user.userId,
-        legacyUserId: legacy.userId,
-        message: err instanceof Error ? err.message : String(err),
-      });
-      return user;
-    }
-  }
-
-  private async findRepositoryConflict(user: StoredUser): Promise<StoredUser | null> {
-    return (await this.repository.findById(user.userId))
-      ?? (user.googleSub ? await this.repository.findByGoogleSub(user.googleSub) : null)
-      ?? (user.email ? await this.repository.findByEmail(user.email) : null)
-      ?? await this.repository.findByUsername(user.username);
-  }
-
-  private async createLegacyUser(legacy: StoredUser): Promise<StoredUser> {
-    const username = await this.uniqueRepositoryUsername(legacy.username);
-    const created = await this.repository.createUser(normalizeUser({
-      ...legacy,
-      username,
-      petals: 0,
-    }));
-    return this.applyLegacyPetalFloor(created, legacy);
-  }
-
-  private async mergeLegacyUser(existing: StoredUser, legacy: StoredUser): Promise<StoredUser> {
-    const merged = await this.repository.updateUser(normalizeUser({
-      ...existing,
-      googleSub: existing.googleSub ?? legacy.googleSub,
-      email: existing.email ?? legacy.email,
-      displayName: legacy.displayName ?? existing.displayName,
-      picture: legacy.picture ?? existing.picture,
-      avatarConfig: existing.avatarConfig ?? legacy.avatarConfig,
-      position: existing.position ?? legacy.position,
-      unlockedItems: [...new Set([...existing.unlockedItems, ...legacy.unlockedItems])],
-      stats: mergeStatsFloor(existing.stats, legacy.stats),
-      migratedFromUserId: existing.migratedFromUserId ?? (existing.userId === legacy.userId ? legacy.migratedFromUserId : legacy.userId),
-      ageConfirmedAt: existing.ageConfirmedAt ?? legacy.ageConfirmedAt,
-      tosAcceptedAt: existing.tosAcceptedAt ?? legacy.tosAcceptedAt,
-      updatedAt: Date.now(),
-    }));
-    return this.applyLegacyPetalFloor(merged, legacy);
-  }
-
-  private legacyImportRefIds(legacyUserId: string): string[] {
-    return [`redis-import:${legacyUserId}`, `legacy-redis:${legacyUserId}`];
-  }
-
-  private async applyLegacyPetalFloor(user: StoredUser, legacy: StoredUser): Promise<StoredUser> {
-    const repaired = (await this.withWalletFloor(user)) ?? user;
-    if (legacy.petals <= repaired.petals) return repaired;
-
-    const replayed = await this.repository.findWalletReplay(repaired.userId, this.legacyImportRefIds(legacy.userId));
-    if (replayed) return (await this.withWalletFloor(replayed)) ?? replayed;
-
-    const funded = await this.repository.applyWalletDelta({
-      userId: repaired.userId,
-      delta: legacy.petals - repaired.petals,
-      reason: 'legacy-import',
-      refId: `redis-import:${legacy.userId}`,
-    });
-    return (await this.withWalletFloor(funded ?? repaired)) ?? repaired;
-  }
-
-  private async uniqueRepositoryUsername(input: string): Promise<string> {
-    const base = this.cleanUsername(input);
-    const existing = await this.repository.findByUsername(base);
-    if (!existing) return base;
-    for (let i = 2; i < 1000; i++) {
-      const candidate = `${base}${i}`;
-      if (!(await this.repository.findByUsername(candidate))) return candidate;
-    }
-    return `${base}${Date.now().toString(36)}`;
-  }
-
-  private async findLegacyUserForGoogle(profile: GoogleProfile): Promise<StoredUser | null> {
-    if (profile.email) {
-      const byEmail = await this.findByEmail(profile.email);
-      if (byEmail && byEmail.provider === 'password' && !byEmail.googleSub) return byEmail;
-
-      const byUsername = await this.findByUsername(profile.email.split('@')[0]);
-      if (byUsername && byUsername.provider === 'password' && !byUsername.googleSub) return byUsername;
-    }
-    return null;
-  }
-
   private async uniqueUsername(input: string): Promise<string> {
     const base = this.cleanUsername(input);
     let candidate = base;
@@ -1258,6 +1021,18 @@ export class UserService {
       candidate = `${base}${i}`;
     }
     return `${base}${Date.now().toString(36)}`;
+  }
+
+  private async findLinkablePasswordUserForGoogle(profile: GoogleProfile): Promise<StoredUser | null> {
+    if (!profile.email) return null;
+
+    const byEmail = await this.findByEmail(profile.email);
+    if (byEmail && byEmail.provider === 'password' && !byEmail.googleSub) return byEmail;
+
+    const byUsername = await this.findByUsername(profile.email.split('@')[0]);
+    if (byUsername && byUsername.provider === 'password' && !byUsername.googleSub) return byUsername;
+
+    return null;
   }
 
   private cleanUsername(input: string): string {
