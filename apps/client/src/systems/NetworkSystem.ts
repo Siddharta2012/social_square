@@ -38,12 +38,12 @@ export interface NetworkCallbacks {
   onRoomUsersCount?: (data: { roomId: string; count: number }) => void;
   onUserHeldItem?: (data: { userId: string; item: HeldItem }) => void;
   onItemGranted?: (data: { item: Exclude<HeldItem, null>; petals?: number; cost: number; source: 'counter' | 'waiter' }) => void;
-  onPetalsCollected?: (data: { amount: number; petals: number; position: Position; source: 'flower' | 'daily' | 'event' | 'task' }) => void;
+  onPetalsCollected?: (data: { amount: number; petals: number; position: Position; source: 'flower' | 'daily' | 'event' | 'task'; requestId?: string }) => void;
   onObjectStateChanged?: (data: { objectId: string; state: ObjectState }) => void;
   onUserEmote?: (data: { userId: string; emoteId: EmoteId }) => void;
   onUserChatMessage?: (data: ChatMessage) => void;
   onAccountUpdated?: (data: { petals?: number; avatarConfig?: AvatarConfig; stats?: Record<string, number> }) => void;
-  onError?: (data: { code: string; message: string }) => void;
+  onError?: (data: { code: string; message: string; requestId?: string }) => void;
 }
 
 export class NetworkSystem {

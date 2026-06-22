@@ -777,16 +777,21 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     }
 
     if (objectId === PETAL_BLOOM_OBJECT_ID) {
+      const requestId = isSafeEventText(payload.requestId, 80) ? payload.requestId : undefined;
+      const emitPetalError = (code: string, message: string) => {
+        socket.emit('error', { code, message, requestId });
+      };
+
       if (!hitSocketRate(socket, 'petal', 8, 10_000)) return;
       if (action !== 'petal-collect') {
-        socket.emit('error', { code: 'UNKNOWN_INTERACTION', message: 'Azione petali sconosciuta' });
+        emitPetalError('UNKNOWN_INTERACTION', 'Azione petali sconosciuta');
         return;
       }
 
       const x = typeof payload?.x === 'number' ? payload.x : NaN;
       const y = typeof payload?.y === 'number' ? payload.y : NaN;
       if (!Number.isFinite(x) || !Number.isFinite(y)) {
-        socket.emit('error', { code: 'INVALID_PETAL', message: 'Petali non validi' });
+        emitPetalError('INVALID_PETAL', 'Petali non validi');
         return;
       }
 
@@ -799,18 +804,18 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         Math.round(candidate.y) === Math.round(y)
       ));
       if (!config || !point) {
-        socket.emit('error', { code: 'INVALID_PETAL', message: 'Fiore non disponibile qui' });
+        emitPetalError('INVALID_PETAL', 'Fiore non disponibile qui');
         return;
       }
       if (!isWithinInteractionRange(roomUser.position, point, PETAL_SERVER_COLLECT_RADIUS_TILES)) {
-        emitTooFar(socket, 'Avvicinati ai petali');
+        emitPetalError('TOO_FAR', 'Avvicinati ai petali');
         return;
       }
 
       const pointKey = petalPointKey(point);
       const reserved = await state.reservePetalCollect(userId, locationId, pointKey, config.intervalMs);
       if (!reserved) {
-        socket.emit('error', { code: 'PETAL_COOLDOWN', message: 'Questo fiore deve ricrescere' });
+        emitPetalError('PETAL_COOLDOWN', 'Questo fiore deve ricrescere');
         return;
       }
 
@@ -821,6 +826,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         petals: nextUser.petals,
         position: point,
         source: 'flower',
+        requestId,
       });
       socket.emit('account-updated', { petals: nextUser.petals, stats: { ...nextUser.stats } });
       logInfo('economy.award', { userId, source: 'flower', amount: config.value, petals: nextUser.petals, locationId });
