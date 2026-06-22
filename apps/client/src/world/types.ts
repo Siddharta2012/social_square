@@ -21,6 +21,7 @@ export type DecorationKind =
   | 'barSign'
   | 'stool'
   | 'table'
+  | 'poolTable'
   | 'jukebox'
   | 'tree'
   | 'shrub'

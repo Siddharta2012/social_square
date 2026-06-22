@@ -24,5 +24,11 @@ describe('UserService wallet', () => {
     expect(afterJukebox?.stats.jukeboxPlays).toBe(1);
 
     await expect(service.spendPetals(user.userId, 100, 'waiter')).resolves.toBeNull();
+
+    const toppedUp = await service.awardPetals(user.userId, 200, 'event');
+    expect(toppedUp?.petals).toBe(250);
+    const afterPool = await service.spendPetals(user.userId, 200, 'pool');
+    expect(afterPool?.petals).toBe(50);
+    expect(afterPool?.stats.poolPlays).toBe(1);
   });
 });

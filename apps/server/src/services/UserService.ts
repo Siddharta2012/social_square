@@ -25,6 +25,7 @@ export interface StoredUserStats {
   itemsPurchased: number;
   waiterOrders: number;
   jukeboxPlays: number;
+  poolPlays: number;
   lastPetalCollectAt: number;
   lastDailyPresenceAt: number;
   lastSeenAt: number;
@@ -253,7 +254,7 @@ export class UserService {
     return next;
   }
 
-  async spendPetals(userId: string, amount: number, source: 'counter' | 'waiter' | 'jukebox' | 'cosmetic' | 'admin' = 'admin'): Promise<StoredUser | null> {
+  async spendPetals(userId: string, amount: number, source: 'counter' | 'waiter' | 'jukebox' | 'pool' | 'cosmetic' | 'admin' = 'admin'): Promise<StoredUser | null> {
     const cost = Math.max(0, Math.trunc(amount));
     const user = await this.findById(userId);
     if (!user || (user.petals ?? 0) < cost) return null;
@@ -262,6 +263,7 @@ export class UserService {
     if (source === 'counter' || source === 'waiter') stats.itemsPurchased += 1;
     if (source === 'waiter') stats.waiterOrders += 1;
     if (source === 'jukebox') stats.jukeboxPlays += 1;
+    if (source === 'pool') stats.poolPlays += 1;
     const next = this.withDefaults({
       ...user,
       petals: user.petals - cost,
@@ -347,6 +349,7 @@ export class UserService {
       itemsPurchased: Math.max(0, Math.trunc(raw?.itemsPurchased ?? 0)),
       waiterOrders: Math.max(0, Math.trunc(raw?.waiterOrders ?? 0)),
       jukeboxPlays: Math.max(0, Math.trunc(raw?.jukeboxPlays ?? 0)),
+      poolPlays: Math.max(0, Math.trunc(raw?.poolPlays ?? 0)),
       lastPetalCollectAt: typeof raw?.lastPetalCollectAt === 'number' ? raw.lastPetalCollectAt : 0,
       lastDailyPresenceAt: typeof raw?.lastDailyPresenceAt === 'number' ? raw.lastDailyPresenceAt : 0,
       lastSeenAt: typeof raw?.lastSeenAt === 'number' ? raw.lastSeenAt : Date.now(),

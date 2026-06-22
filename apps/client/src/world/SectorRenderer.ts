@@ -227,6 +227,11 @@ export class SectorRenderer {
         this._drawBarTable(gfx, decoration);
         container.setDepth(IsometricSystem.depth(gx, gy) + 0.08);
         break;
+      case 'poolTable':
+        this._drawPoolTable(gfx, light, decoration);
+        lights.push(this._registerLight(light, 0.32));
+        container.setDepth(IsometricSystem.depth(gx, gy) + 0.11);
+        break;
       case 'jukebox':
         this._drawJukebox(gfx, light, decoration);
         lights.push(this._registerLight(light, 0.7));
@@ -431,6 +436,36 @@ export class SectorRenderer {
     gfx.fillCircle(-8, -17, 3);
     gfx.fillStyle(0x3b2b22, 0.65);
     gfx.fillCircle(8, -15, 3);
+  }
+
+  private _drawPoolTable(
+    gfx: Phaser.GameObjects.Graphics,
+    light: Phaser.GameObjects.Graphics,
+    decoration: DecorationData,
+  ): void {
+    const rail = decoration.color ?? 0x5f3a24;
+    const felt = decoration.accentColor ?? 0x177a53;
+    this._softShadow(gfx, 108, 30, 5);
+    gfx.fillStyle(this._shade(rail, 0.6), 1);
+    gfx.fillRoundedRect(-54, -27, 108, 38, 7);
+    gfx.fillStyle(rail, 1);
+    gfx.fillRoundedRect(-50, -34, 100, 42, 7);
+    gfx.fillStyle(felt, 1);
+    gfx.fillRoundedRect(-41, -28, 82, 30, 5);
+    gfx.fillStyle(0x0b231a, 1);
+    for (const [x, y] of [[-38, -25], [0, -27], [38, -25], [-38, -1], [0, 1], [38, -1]] as Array<[number, number]>) {
+      gfx.fillCircle(x, y, 4);
+    }
+    gfx.lineStyle(2, 0xd7b56d, 0.9);
+    gfx.lineBetween(-33, -12, 26, -21);
+    gfx.fillStyle(0xffffff, 1);
+    gfx.fillCircle(-18, -15, 3);
+    gfx.fillStyle(0xffd166, 1);
+    gfx.fillCircle(14, -14, 3);
+    gfx.fillStyle(0xff6b6b, 1);
+    gfx.fillCircle(22, -9, 3);
+    light.fillStyle(0x78ffc9, 1);
+    light.fillEllipse(0, -14, 96, 44);
   }
 
   private _drawJukebox(

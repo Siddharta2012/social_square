@@ -4,6 +4,7 @@ import {
   JUKEBOX_PLAY_COST,
   ORDER_ITEMS,
   PETAL_ACTION_COST,
+  POOL_PLAY_COST,
   normalizeChatText,
   orderItemLabel,
   parseJukeboxExternalTrack,
@@ -14,6 +15,7 @@ import { useUserStore } from '../store/userStore';
 import { AuthForm } from './AuthForm';
 import { VoiceControls } from './VoiceControls';
 import { AudioSettingsModal } from './AudioSettingsModal';
+import { PoolOverlay } from './PoolOverlay';
 import { eventBus } from '../eventBus';
 import { fastTravelLocations } from '../world/locations';
 import { claimDailyPresence, fetchAccountProfile, logoutAccount } from '../api/account';
@@ -41,6 +43,7 @@ export const HUD: React.FC = () => {
   const worldLoading = useGameStore((s) => s.worldLoading);
   const localAvatarState = useGameStore((s) => s.localAvatarState);
   const jukeboxStatus = useGameStore((s) => s.jukeboxStatus);
+  const showPoolOverlay = useGameStore((s) => s.showPoolOverlay);
   const chatMessages = useGameStore((s) => s.chatMessages);
   const waiterStatus = useGameStore((s) => s.waiterStatus);
   const actionAvailability = useGameStore((s) => s.actionAvailability);
@@ -240,6 +243,7 @@ export const HUD: React.FC = () => {
   const waiterCanQueue = Boolean(waiterStatus && !waiterCanCall && !waiterIsMine);
   const canUseJukebox = actionAvailability.nearJukebox;
   const canUseWaiter = actionAvailability.nearWaiter;
+  const canUsePool = actionAvailability.nearPool;
   const canAffordAction = petals >= PETAL_ACTION_COST;
   const waiterButtonEnabled = canUseWaiter && !waiterAwaitingOrder && !waiterAlreadyWaiting && (waiterCanCall || waiterCanQueue);
   const waiterLabel = waiterCanCall
@@ -506,6 +510,14 @@ export const HUD: React.FC = () => {
               <button style={smallButtonStyle} onClick={() => setShowWorldMap(!showWorldMap)}>
                 Mappa
               </button>
+              <button
+                style={{ ...smallButtonStyle, ...(!canUsePool ? disabledButtonStyle : {}) }}
+                disabled={!canUsePool}
+                title={canUsePool ? `${POOL_PLAY_COST} petali` : 'Avvicinati al biliardo'}
+                onClick={() => eventBus.emit('pool-open')}
+              >
+                Biliardo
+              </button>
               <button style={smallButtonStyle} onClick={handleDailyPresence} title={dailyPresenceMsg || 'Bonus presenza'}>
                 Presenza
               </button>
@@ -690,6 +702,23 @@ export const HUD: React.FC = () => {
                 onClick={handleDailyPresence}
               >
                 {dailyPresenceMsg || 'Bonus presenza'}
+              </button>
+
+              <button
+                style={{
+                  ...smallButtonStyle,
+                  width: '100%',
+                  height: '36px',
+                  marginBottom: '8px',
+                  ...(!canUsePool ? disabledButtonStyle : {}),
+                }}
+                disabled={!canUsePool}
+                onClick={() => {
+                  setMobilePanel(null);
+                  eventBus.emit('pool-open');
+                }}
+              >
+                Biliardo
               </button>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', marginBottom: '8px' }}>
@@ -935,6 +964,10 @@ export const HUD: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {inRoom && showPoolOverlay && (
+        <PoolOverlay isCompact={isCompactHud} />
       )}
 
       {inRoom && showJukeboxLink && (

@@ -10,6 +10,7 @@ export interface AccountStats {
   itemsPurchased: number;
   waiterOrders: number;
   jukeboxPlays: number;
+  poolPlays: number;
   lastPetalCollectAt: number;
   lastDailyPresenceAt: number;
   lastSeenAt: number;

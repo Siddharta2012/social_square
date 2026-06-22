@@ -4,6 +4,10 @@ import {
   JUKEBOX_PLAY_COST,
   JUKEBOX_PLAY_DURATION_MS,
   JUKEBOX_TRACKS,
+  POOL_OBJECT_ID,
+  POOL_PLAY_COST,
+  POOL_POSITION,
+  normalizePoolState,
   nextJukeboxTrackId,
   normalizeJukeboxState,
   parseJukeboxExternalTrack,
@@ -44,10 +48,20 @@ describe('phase 2 interaction data', () => {
   it('defines proximity and petal costs for location based actions', () => {
     expect(PETAL_ACTION_COST).toBe(100);
     expect(JUKEBOX_PLAY_COST).toBe(200);
+    expect(POOL_PLAY_COST).toBe(200);
     expect(JUKEBOX_PLAY_DURATION_MS).toBe(180_000);
     expect(INTERACTION_RADIUS_TILES).toBeGreaterThan(2);
     expect(isWithinInteractionRange({ x: 16, y: 3 }, { x: 17, y: 4 })).toBe(true);
     expect(isWithinInteractionRange({ x: 16, y: 3 }, { x: 22, y: 8 })).toBe(false);
+  });
+
+  it('defines billiards as a paid bar interaction', () => {
+    const state = normalizePoolState({ phase: 'waiting', mode: 'duo', players: [{ userId: 'a', username: 'A' }] }, 1000);
+
+    expect(POOL_OBJECT_ID).toBe('pool:bar');
+    expect(POOL_POSITION).toEqual({ x: 9, y: 8 });
+    expect(state.phase).toBe('waiting');
+    expect(state.players[0].userId).toBe('a');
   });
 
   it('keeps configured petal spawn points on walkable tiles', () => {

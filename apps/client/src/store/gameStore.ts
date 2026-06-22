@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { CHAT_HISTORY_LIMIT } from '@social-square/shared';
-import type { AvatarState, ChatMessage, HeldItem, JukeboxHistoryEntry, JukeboxTrackId, WaiterState } from '@social-square/shared';
+import type { AvatarState, ChatMessage, HeldItem, JukeboxHistoryEntry, JukeboxTrackId, PoolState, WaiterState } from '@social-square/shared';
 
 export type WorldLoadingState = 'initial' | 'streaming' | null;
 
@@ -27,7 +27,9 @@ export interface SpeakingUser {
 export interface ActionAvailability {
   nearJukebox: boolean;
   nearWaiter: boolean;
+  nearPool: boolean;
   canAffordAction: boolean;
+  canAffordPool: boolean;
 }
 
 export interface UserActionMenu {
@@ -92,6 +94,10 @@ interface GameState {
   setLocalAvatarState: (state: AvatarState) => void;
   jukeboxStatus: JukeboxStatus | null;
   setJukeboxStatus: (status: JukeboxStatus | null) => void;
+  poolStatus: PoolState | null;
+  setPoolStatus: (status: PoolState | null) => void;
+  showPoolOverlay: boolean;
+  setShowPoolOverlay: (show: boolean) => void;
   chatMessages: ChatMessage[];
   addChatMessage: (message: ChatMessage) => void;
   clearChatMessages: () => void;
@@ -147,6 +153,10 @@ export const useGameStore = create<GameState>((set) => ({
   setLocalAvatarState: (state) => set({ localAvatarState: state }),
   jukeboxStatus: null,
   setJukeboxStatus: (status) => set({ jukeboxStatus: status }),
+  poolStatus: null,
+  setPoolStatus: (status) => set({ poolStatus: status }),
+  showPoolOverlay: false,
+  setShowPoolOverlay: (show) => set({ showPoolOverlay: show }),
   chatMessages: [],
   addChatMessage: (message) => set((state) => ({
     chatMessages: [...state.chatMessages, message].slice(-CHAT_HISTORY_LIMIT),
@@ -157,7 +167,9 @@ export const useGameStore = create<GameState>((set) => ({
   actionAvailability: {
     nearJukebox: false,
     nearWaiter: false,
+    nearPool: false,
     canAffordAction: false,
+    canAffordPool: false,
   },
   setActionAvailability: (availability) => set({ actionAvailability: availability }),
   showWorldMap: false,

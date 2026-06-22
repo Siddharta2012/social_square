@@ -8,6 +8,9 @@ import {
   INTERACTION_RADIUS_TILES,
   PETAL_ACTION_COST,
   PETAL_BLOOM_OBJECT_ID,
+  POOL_OBJECT_ID,
+  POOL_PLAY_COST,
+  POOL_POSITION,
   JUKEBOX_PLAY_COST,
   JUKEBOX_PLAY_DURATION_MS,
   JUKEBOX_OBJECT_ID,
@@ -28,7 +31,10 @@ import {
   nextJukeboxTrackId,
   normalizeChatText,
   normalizeJukeboxState,
+  normalizePoolState,
   normalizeWaiterState,
+  parsePoolBalls,
+  poolStateToObjectState,
   parseJukeboxExternalTrack,
   positionToSector,
 } from '@social-square/shared';
@@ -48,6 +54,7 @@ import type {
   WaiterState,
   WaiterQueueEntry,
   JukeboxState,
+  PoolState,
 } from '@social-square/shared';
 import { StateService } from '../../services/StateService';
 import { UserService } from '../../services/UserService';
@@ -141,6 +148,22 @@ function withJukeboxHistory(next: JukeboxState, requester: string, now: number):
       ...(next.history ?? []),
     ].slice(0, 8),
   };
+}
+
+function poolPlayer(state: PoolState, userId: string): PoolState['players'][number] | undefined {
+  return state.players.find((player) => player.userId === userId);
+}
+
+function nextPoolTurn(state: PoolState, userId: string): string | undefined {
+  if (state.mode === 'solo' || state.players.length < 2) return userId;
+  const currentIndex = state.players.findIndex((player) => player.userId === userId);
+  return state.players[(currentIndex + 1) % state.players.length]?.userId ?? state.players[0]?.userId;
+}
+
+async function emitPoolState(io: IoServer, roomId: string, nextState: PoolState): Promise<void> {
+  const objectState = poolStateToObjectState(nextState);
+  await state.updateObjectState(roomId, POOL_OBJECT_ID, objectState);
+  await emitObjectStateChangedToInterested(io, roomId, { objectId: POOL_OBJECT_ID, state: objectState });
 }
 
 async function currentRoomUser(roomId: string, userId: string): Promise<RoomUser | null> {
@@ -620,6 +643,20 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     const roomId = socket.data.currentRoom;
     if (!roomId) return;
     const clearedObjects = await state.clearObjectOccupancy(roomId, userId);
+    const poolState = normalizePoolState(await state.getObjectState(roomId, POOL_OBJECT_ID));
+    const poolPlayers = poolState.players.filter((player) => player.userId !== userId);
+    if (poolPlayers.length !== poolState.players.length) {
+      const nextPool = poolPlayers.length === 0
+        ? normalizePoolState(null)
+        : {
+            ...poolState,
+            phase: poolState.mode === 'duo' && poolPlayers.length === 1 ? 'waiting' as const : poolState.phase,
+            players: poolPlayers,
+            turnUserId: poolPlayers[0]?.userId,
+            updatedAt: Date.now(),
+          };
+      await emitPoolState(io, roomId, nextPool);
+    }
     const roomState = await state.getRoomState(roomId);
     const leavingUser = roomState.users.find((user) => user.userId === userId);
     await socket.leave(roomId);
@@ -981,6 +1018,147 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
 
       await state.updateObjectState(roomId, objectId, next as unknown as ObjectState);
       await emitObjectStateChangedToInterested(io, roomId, { objectId, state: next as unknown as ObjectState });
+      return;
+    }
+
+    if (objectId === POOL_OBJECT_ID) {
+      const player = await ensureUserNear(
+        socket,
+        roomId,
+        userId,
+        POOL_POSITION,
+        'Avvicinati al biliardo',
+      );
+      if (!player) return;
+      if (locationIdFor(player.position) !== '0,0') {
+        socket.emit('error', { code: 'WRONG_LOCATION', message: 'Il biliardo e nel bar' });
+        return;
+      }
+
+      const now = Date.now();
+      const current = normalizePoolState(await state.getObjectState(roomId, objectId), now);
+
+      if (action === 'pool-start-solo' || action === 'pool-create-duo' || action === 'pool-join-duo') {
+        if (poolPlayer(current, userId)) {
+          socket.emit('error', { code: 'POOL_ALREADY_JOINED', message: 'Sei gia al tavolo' });
+          return;
+        }
+        if (action !== 'pool-join-duo' && (current.phase === 'playing' || current.phase === 'waiting')) {
+          socket.emit('error', { code: 'POOL_BUSY', message: 'Il biliardo e gia occupato' });
+          return;
+        }
+        if (action === 'pool-join-duo' && (current.phase !== 'waiting' || current.mode !== 'duo' || current.players.length !== 1)) {
+          socket.emit('error', { code: 'POOL_NOT_WAITING', message: 'Nessuna partita a due in attesa' });
+          return;
+        }
+
+        const paidUser = await userService.spendPetals(userId, POOL_PLAY_COST, 'pool');
+        if (!paidUser) {
+          socket.emit('error', { code: 'INSUFFICIENT_PETALS', message: `Servono ${POOL_PLAY_COST} petali` });
+          return;
+        }
+        socket.emit('account-updated', { petals: paidUser.petals, stats: { ...paidUser.stats } });
+        logInfo('economy.spend', { userId, source: 'pool', amount: POOL_PLAY_COST, petals: paidUser.petals });
+
+        const joining = { userId, username, joinedAt: now };
+        const next: PoolState = action === 'pool-start-solo'
+          ? {
+              ...normalizePoolState(null, now),
+              phase: 'playing',
+              mode: 'solo',
+              players: [joining],
+              turnUserId: userId,
+              message: `${username} gioca da solo`,
+              updatedAt: now,
+            }
+          : action === 'pool-create-duo'
+            ? {
+                ...normalizePoolState(null, now),
+                phase: 'waiting',
+                mode: 'duo',
+                players: [joining],
+                turnUserId: userId,
+                message: `${username} aspetta un avversario`,
+                updatedAt: now,
+              }
+            : {
+                ...current,
+                phase: 'playing',
+                mode: 'duo',
+                players: [...current.players, joining],
+                turnUserId: current.players[0]?.userId ?? userId,
+                message: `${username} entra al tavolo`,
+                updatedAt: now,
+              };
+
+        await emitPoolState(io, roomId, next);
+        return;
+      }
+
+      if (action === 'pool-shot') {
+        if (current.phase !== 'playing' || !poolPlayer(current, userId)) {
+          socket.emit('error', { code: 'POOL_NOT_PLAYING', message: 'Non sei in questa partita' });
+          return;
+        }
+        if (current.turnUserId && current.turnUserId !== userId) {
+          socket.emit('error', { code: 'POOL_NOT_YOUR_TURN', message: 'Non e il tuo turno' });
+          return;
+        }
+
+        const angle = typeof payload.angle === 'number' && Number.isFinite(payload.angle) ? payload.angle : NaN;
+        const power = typeof payload.power === 'number' && Number.isFinite(payload.power) ? payload.power : NaN;
+        if (!Number.isFinite(angle) || !Number.isFinite(power)) {
+          socket.emit('error', { code: 'INVALID_POOL_SHOT', message: 'Tiro non valido' });
+          return;
+        }
+
+        const next: PoolState = {
+          ...current,
+          turnUserId: nextPoolTurn(current, userId),
+          lastShot: {
+            shotId: randomUUID(),
+            userId,
+            angle: Math.max(-Math.PI * 2, Math.min(Math.PI * 2, angle)),
+            power: Math.max(0, Math.min(1, power)),
+            createdAt: now,
+          },
+          message: `${username} tira`,
+          updatedAt: now,
+        };
+        await emitPoolState(io, roomId, next);
+        return;
+      }
+
+      if (action === 'pool-sync') {
+        if (current.phase !== 'playing' || !poolPlayer(current, userId)) return;
+        const balls = parsePoolBalls(payload.balls);
+        if (!balls) return;
+        await emitPoolState(io, roomId, {
+          ...current,
+          balls,
+          updatedAt: now,
+        });
+        return;
+      }
+
+      if (action === 'pool-leave') {
+        if (!poolPlayer(current, userId)) return;
+        const remaining = current.players.filter((entry) => entry.userId !== userId);
+        const next: PoolState = remaining.length === 0
+          ? normalizePoolState(null, now)
+          : {
+              ...current,
+              phase: current.mode === 'duo' && remaining.length === 1 ? 'waiting' : current.phase,
+              players: remaining,
+              turnUserId: remaining[0]?.userId,
+              message: `${username} lascia il tavolo`,
+              updatedAt: now,
+            };
+        await emitPoolState(io, roomId, next);
+        return;
+      }
+
+      socket.emit('error', { code: 'UNKNOWN_INTERACTION', message: 'Azione biliardo sconosciuta' });
       return;
     }
 

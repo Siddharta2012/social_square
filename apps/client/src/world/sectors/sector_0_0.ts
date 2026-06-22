@@ -18,6 +18,7 @@ const OBSTACLES: Array<[number, number]> = [
   [12, 5],
   [4, 10],
   [12, 10],
+  [8, 8], [9, 8],
 ];
 
 const DECORATIONS: DecorationData[] = [
@@ -31,6 +32,7 @@ const DECORATIONS: DecorationData[] = [
   { kind: 'table', x: 12, y: 5, variant: 1 },
   { kind: 'table', x: 4, y: 10, variant: 2 },
   { kind: 'table', x: 12, y: 10, variant: 3 },
+  { kind: 'poolTable', x: 9, y: 8 },
   ...[1, 3, 5, 7].map((x, variant) => ({ kind: 'stool' as const, x, y: 1, variant })),
   ...[
     [3, 6], [6, 6], [11, 6], [14, 6],

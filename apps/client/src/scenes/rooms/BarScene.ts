@@ -11,11 +11,16 @@ import {
   BAR_SERVICE_OBJECT_ID,
   JUKEBOX_PLAY_COST,
   PETAL_BLOOM_OBJECT_ID,
+  POOL_OBJECT_ID,
+  POOL_PLAY_COST,
+  POOL_POSITION,
   WAITER_OBJECT_ID,
   jukeboxTitle,
   normalizeJukeboxState,
+  normalizePoolState,
   normalizeWaiterState,
   parseJukeboxExternalTrack,
+  serializePoolBalls,
 } from '@social-square/shared';
 import type {
   AvatarConfig,
@@ -26,6 +31,7 @@ import type {
   JukeboxState,
   ObjectState,
   OrderItemId,
+  PoolBall,
   Position,
   WaiterState,
 } from '@social-square/shared';
@@ -184,6 +190,7 @@ export class BarScene extends BaseRoomScene {
   private _sipsLeft = 0;
   private _jukebox = new JukeboxPlayer();
   private _jukeboxState: JukeboxState = normalizeJukeboxState(null);
+  private _poolState = normalizePoolState(null);
   private _seatOccupants = new Map<string, string>();
   private _pendingSeat: SeatDefinition | null = null;
   private _seatedSeatId: string | null = null;
@@ -275,6 +282,13 @@ export class BarScene extends BaseRoomScene {
     eventBus.on('fast-travel', (locationId: LocationId) => this._fastTravel(locationId), this);
     eventBus.on('voice-user-mute', (userId: string, muted: boolean) => this._setRemoteVoiceMuted(userId, muted), this);
     eventBus.on('jukebox-play-url', (url: string) => this._requestJukeboxPlayUrl(url), this);
+    eventBus.on('pool-open', () => this._requestPoolOpen(), this);
+    eventBus.on('pool-start-solo', () => this._requestPoolStart('pool-start-solo'), this);
+    eventBus.on('pool-create-duo', () => this._requestPoolStart('pool-create-duo'), this);
+    eventBus.on('pool-join-duo', () => this._requestPoolStart('pool-join-duo'), this);
+    eventBus.on('pool-shot', (shot: { angle: number; power: number }) => this._requestPoolShot(shot), this);
+    eventBus.on('pool-sync', (balls: PoolBall[]) => this._requestPoolSync(balls), this);
+    eventBus.on('pool-leave', () => this._requestPoolLeave(), this);
     useGameStore.getState().clearChatMessages();
 
     this._rebuildLocationStations();
@@ -368,6 +382,14 @@ export class BarScene extends BaseRoomScene {
         hitWidth: 54, hitHeight: 62,
         onInteract: () => this._requestJukeboxNext(),
       }));
+
+      this._stations.push(new InteractStation({
+        scene: this, worldX: POOL_POSITION.x, worldY: POOL_POSITION.y,
+        label: `Biliardo - ${POOL_PLAY_COST} petali`,
+        draw: drawHotspot,
+        hitWidth: 92, hitHeight: 58,
+        onInteract: () => this._requestPoolOpen(),
+      }));
     }
 
     for (const seat of SEAT_DEFINITIONS) {
@@ -447,17 +469,19 @@ export class BarScene extends BaseRoomScene {
     const inBarInterior = locationInfo.id === '0,0';
     const nearJukebox = inBarInterior && this._isNear(JUKEBOX_POSITION);
     const nearWaiter = inBarInterior && this._isNear(this._waiterPosition());
+    const nearPool = inBarInterior && this._isNear(POOL_POSITION);
     const store = useGameStore.getState();
     const canAffordAction = store.petals >= PETAL_ACTION_COST;
+    const canAffordPool = store.petals >= POOL_PLAY_COST;
     const nearbyExit = this._nearestExit(local);
     const routeHint = nearbyExit ? `Verso ${targetName(nearbyExit)}` : null;
-    const key = `${location}|${nearJukebox ? 1 : 0}|${nearWaiter ? 1 : 0}|${canAffordAction ? 1 : 0}|${routeHint ?? ''}`;
+    const key = `${location}|${nearJukebox ? 1 : 0}|${nearWaiter ? 1 : 0}|${nearPool ? 1 : 0}|${canAffordAction ? 1 : 0}|${canAffordPool ? 1 : 0}|${routeHint ?? ''}`;
     if (key === this._lastLocalContextKey) return;
 
     this._lastLocalContextKey = key;
     store.setLocationName(location);
     store.setRouteHint(routeHint);
-    store.setActionAvailability({ nearJukebox, nearWaiter, canAffordAction });
+    store.setActionAvailability({ nearJukebox, nearWaiter, nearPool, canAffordAction, canAffordPool });
   }
 
   private _startPetalSpawns(): void {
@@ -762,6 +786,7 @@ export class BarScene extends BaseRoomScene {
     this._seedPetalBloomsForLocation();
     this._applyWaiterState(this._waiterState);
     this._syncJukeboxForLocation();
+    this._applyPoolState(this._poolState);
     this._syncLocalContext();
     void this._connectVoiceForCurrentLocation();
   }
@@ -1056,6 +1081,71 @@ export class BarScene extends BaseRoomScene {
     return this._currentLocationId() === '0,0';
   }
 
+  private _requestPoolOpen(): void {
+    if (!this._isInPoolLocation()) {
+      this._showNotice('Biliardo disponibile al bar');
+      return;
+    }
+    if (!this._isNear(POOL_POSITION)) {
+      this._showNotice('Avvicinati al biliardo');
+      return;
+    }
+    useGameStore.getState().setShowPoolOverlay(true);
+  }
+
+  private _requestPoolStart(action: 'pool-start-solo' | 'pool-create-duo' | 'pool-join-duo'): void {
+    if (!this._isInPoolLocation()) {
+      this._showNotice('Biliardo disponibile al bar');
+      return;
+    }
+    if (!this._isNear(POOL_POSITION)) {
+      this._showNotice('Avvicinati al biliardo');
+      return;
+    }
+    if (useGameStore.getState().petals < POOL_PLAY_COST) {
+      this._showNotice(`Servono ${POOL_PLAY_COST} petali`);
+      return;
+    }
+    this._network?.emitInteract(POOL_OBJECT_ID, action);
+  }
+
+  private _requestPoolShot(shot: { angle: number; power: number }): void {
+    this._network?.emitInteract(POOL_OBJECT_ID, 'pool-shot', {
+      angle: shot.angle,
+      power: shot.power,
+    });
+  }
+
+  private _requestPoolSync(balls: PoolBall[]): void {
+    this._network?.emitInteract(POOL_OBJECT_ID, 'pool-sync', {
+      balls: serializePoolBalls(balls),
+    });
+  }
+
+  private _requestPoolLeave(): void {
+    this._network?.emitInteract(POOL_OBJECT_ID, 'pool-leave');
+    useGameStore.getState().setShowPoolOverlay(false);
+  }
+
+  private _applyPoolState(rawState: unknown): void {
+    const state = normalizePoolState(rawState);
+    this._poolState = state;
+    const store = useGameStore.getState();
+    if (!this._isInPoolLocation()) {
+      store.setPoolStatus(null);
+      store.setShowPoolOverlay(false);
+      return;
+    }
+    store.setPoolStatus(state);
+    if (state.players.some((player) => player.userId === this._myUserId) && state.phase !== 'idle') {
+      store.setShowPoolOverlay(true);
+    }
+  }
+
+  private _isInPoolLocation(): boolean {
+    return this._currentLocationId() === '0,0';
+  }
+
   private _syncJukeboxForLocation(): void {
     if (this._isInJukeboxLocation()) return;
     this._jukebox.setSpatial(0, 0);
@@ -1086,6 +1176,10 @@ export class BarScene extends BaseRoomScene {
     }
     if (objectId === JUKEBOX_OBJECT_ID) {
       void this._applyJukeboxState(objectState);
+      return;
+    }
+    if (objectId === POOL_OBJECT_ID) {
+      this._applyPoolState(objectState);
       return;
     }
     if (isSeatObjectId(objectId)) this._applySeatState(objectId, objectState);
@@ -1479,6 +1573,13 @@ export class BarScene extends BaseRoomScene {
     eventBus.off('fast-travel');
     eventBus.off('voice-user-mute');
     eventBus.off('jukebox-play-url');
+    eventBus.off('pool-open');
+    eventBus.off('pool-start-solo');
+    eventBus.off('pool-create-duo');
+    eventBus.off('pool-join-duo');
+    eventBus.off('pool-shot');
+    eventBus.off('pool-sync');
+    eventBus.off('pool-leave');
     this.input.keyboard?.off('keydown-B');
     this.input.keyboard?.off('keydown-ONE');
     this.input.keyboard?.off('keydown-TWO');
@@ -1523,6 +1624,8 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().setSpeakingUsers([]);
     useGameStore.getState().setHeldItem(null);
     useGameStore.getState().setJukeboxStatus(null);
+    useGameStore.getState().setPoolStatus(null);
+    useGameStore.getState().setShowPoolOverlay(false);
     useGameStore.getState().setLocalAvatarState('idle');
     useGameStore.getState().clearChatMessages();
     useGameStore.getState().setWaiterStatus(null);
@@ -1530,7 +1633,9 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().setActionAvailability({
       nearJukebox: false,
       nearWaiter: false,
+      nearPool: false,
       canAffordAction: useGameStore.getState().petals >= PETAL_ACTION_COST,
+      canAffordPool: useGameStore.getState().petals >= POOL_PLAY_COST,
     });
     this._lastLocalContextKey = '';
   }
