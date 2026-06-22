@@ -24,6 +24,11 @@ export interface SpeakingUser {
   pan: number;
 }
 
+export interface PoolMessage {
+  text: string;
+  tone: 'info' | 'error';
+}
+
 export interface ActionAvailability {
   nearJukebox: boolean;
   nearWaiter: boolean;
@@ -98,6 +103,8 @@ interface GameState {
   setPoolStatus: (status: PoolState | null) => void;
   showPoolOverlay: boolean;
   setShowPoolOverlay: (show: boolean) => void;
+  poolMessage: PoolMessage | null;
+  setPoolMessage: (message: PoolMessage | null) => void;
   chatMessages: ChatMessage[];
   addChatMessage: (message: ChatMessage) => void;
   clearChatMessages: () => void;
@@ -157,6 +164,8 @@ export const useGameStore = create<GameState>((set) => ({
   setPoolStatus: (status) => set({ poolStatus: status }),
   showPoolOverlay: false,
   setShowPoolOverlay: (show) => set({ showPoolOverlay: show }),
+  poolMessage: null,
+  setPoolMessage: (message) => set({ poolMessage: message }),
   chatMessages: [],
   addChatMessage: (message) => set((state) => ({
     chatMessages: [...state.chatMessages, message].slice(-CHAT_HISTORY_LIMIT),

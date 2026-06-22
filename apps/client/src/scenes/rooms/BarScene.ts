@@ -1083,29 +1083,34 @@ export class BarScene extends BaseRoomScene {
 
   private _requestPoolOpen(): void {
     if (!this._isInPoolLocation()) {
-      this._showNotice('Biliardo disponibile al bar');
+      this._showPoolMessage('Biliardo disponibile al bar', 'error');
       return;
     }
     if (!this._isNear(POOL_POSITION)) {
-      this._showNotice('Avvicinati al biliardo');
+      this._showPoolMessage('Avvicinati al biliardo', 'error');
       return;
     }
-    useGameStore.getState().setShowPoolOverlay(true);
+    const store = useGameStore.getState();
+    store.setPoolMessage(null);
+    store.setShowPoolOverlay(true);
   }
 
   private _requestPoolStart(action: 'pool-start-solo' | 'pool-create-duo' | 'pool-join-duo'): void {
     if (!this._isInPoolLocation()) {
-      this._showNotice('Biliardo disponibile al bar');
+      this._showPoolMessage('Biliardo disponibile al bar', 'error');
       return;
     }
     if (!this._isNear(POOL_POSITION)) {
-      this._showNotice('Avvicinati al biliardo');
+      this._showPoolMessage('Avvicinati al biliardo', 'error');
       return;
     }
-    if (useGameStore.getState().petals < POOL_PLAY_COST) {
-      this._showNotice(`Servono ${POOL_PLAY_COST} petali`);
+    const store = useGameStore.getState();
+    if (store.petals < POOL_PLAY_COST) {
+      this._showPoolMessage(`Servono ${POOL_PLAY_COST} petali`, 'error');
       return;
     }
+    store.setPoolMessage({ text: 'Richiesta inviata al tavolo...', tone: 'info' });
+    this._syncPoolPositionForServer();
     this._network?.emitInteract(POOL_OBJECT_ID, action);
   }
 
@@ -1124,7 +1129,9 @@ export class BarScene extends BaseRoomScene {
 
   private _requestPoolLeave(): void {
     this._network?.emitInteract(POOL_OBJECT_ID, 'pool-leave');
-    useGameStore.getState().setShowPoolOverlay(false);
+    const store = useGameStore.getState();
+    store.setPoolMessage(null);
+    store.setShowPoolOverlay(false);
   }
 
   private _applyPoolState(rawState: unknown): void {
@@ -1134,16 +1141,34 @@ export class BarScene extends BaseRoomScene {
     if (!this._isInPoolLocation()) {
       store.setPoolStatus(null);
       store.setShowPoolOverlay(false);
+      store.setPoolMessage(null);
       return;
     }
     store.setPoolStatus(state);
     if (state.players.some((player) => player.userId === this._myUserId) && state.phase !== 'idle') {
       store.setShowPoolOverlay(true);
+      if (!store.poolMessage || store.poolMessage.text === 'Richiesta inviata al tavolo...') {
+        store.setPoolMessage({
+          text: state.phase === 'waiting' ? 'Stanza creata. In attesa del secondo giocatore.' : 'Partita avviata.',
+          tone: 'info',
+        });
+      }
     }
   }
 
   private _isInPoolLocation(): boolean {
     return this._currentLocationId() === '0,0';
+  }
+
+  private _showPoolMessage(message: string, tone: 'info' | 'error'): void {
+    useGameStore.getState().setPoolMessage({ text: message, tone });
+    this._showNotice(message);
+  }
+
+  private _syncPoolPositionForServer(): void {
+    const local = this._localPosition();
+    if (!local) return;
+    this._network?.emitMove(local.x, local.y, Direction.SE, 'idle', true);
   }
 
   private _syncJukeboxForLocation(): void {
@@ -1347,7 +1372,16 @@ export class BarScene extends BaseRoomScene {
         if (code === 'PETAL_COOLDOWN' || code === 'INVALID_PETAL' || code === 'TOO_FAR') {
           this._pendingPetalCollects.clear();
         }
-        if (message) this._showNotice(message);
+        if (message) {
+          const store = useGameStore.getState();
+          if (
+            store.showPoolOverlay &&
+            (code.startsWith('POOL_') || code === 'INSUFFICIENT_PETALS' || code === 'TOO_FAR')
+          ) {
+            store.setPoolMessage({ text: message, tone: 'error' });
+          }
+          this._showNotice(message);
+        }
       },
     });
 
@@ -1626,6 +1660,7 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().setJukeboxStatus(null);
     useGameStore.getState().setPoolStatus(null);
     useGameStore.getState().setShowPoolOverlay(false);
+    useGameStore.getState().setPoolMessage(null);
     useGameStore.getState().setLocalAvatarState('idle');
     useGameStore.getState().clearChatMessages();
     useGameStore.getState().setWaiterStatus(null);

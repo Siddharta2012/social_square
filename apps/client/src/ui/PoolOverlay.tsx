@@ -29,6 +29,8 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
   const syncingShotRef = useRef<string | null>(null);
   const poolStatus = useGameStore((s) => s.poolStatus);
   const setShowPoolOverlay = useGameStore((s) => s.setShowPoolOverlay);
+  const poolMessage = useGameStore((s) => s.poolMessage);
+  const setPoolMessage = useGameStore((s) => s.setPoolMessage);
   const petals = useGameStore((s) => s.petals);
   const actionAvailability = useGameStore((s) => s.actionAvailability);
   const userId = useUserStore((s) => s.userId);
@@ -39,9 +41,14 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
 
   const me = pool.players.find((player) => player.userId === userId);
   const isPlayer = Boolean(me);
-  const canPay = petals >= POOL_PLAY_COST && actionAvailability.nearPool;
+  const canPay = petals >= POOL_PLAY_COST;
   const myTurn = pool.phase === 'playing' && isPlayer && (!pool.turnUserId || pool.turnUserId === userId);
   const canShoot = myTurn && !moving;
+  const inlineMessage = poolMessage ?? (!canPay
+    ? { text: `Servono ${POOL_PLAY_COST} petali per iniziare`, tone: 'error' as const }
+    : !actionAvailability.nearPool
+      ? { text: 'Resta vicino al biliardo per avviare una partita', tone: 'info' as const }
+      : null);
 
   useEffect(() => {
     if (pool.lastShot?.shotId && pool.lastShot.shotId !== processedShotRef.current) {
@@ -93,8 +100,7 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
   };
 
   const disabledStyle: React.CSSProperties = {
-    opacity: 0.42,
-    cursor: 'default',
+    opacity: 0.52,
   };
 
   const playersLabel = pool.players.length === 0
@@ -131,15 +137,33 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
           </div>
           <div style={{ display: 'flex', gap: '7px' }}>
             {isPlayer && (
-              <button style={buttonStyle} onClick={() => eventBus.emit('pool-leave')}>
+              <button type="button" style={buttonStyle} onClick={() => eventBus.emit('pool-leave')}>
                 Esci partita
               </button>
             )}
-            <button style={buttonStyle} onClick={() => setShowPoolOverlay(false)}>
+            <button type="button" style={buttonStyle} onClick={hidePoolOverlay}>
               Nascondi
             </button>
           </div>
         </div>
+
+        {inlineMessage && (
+          <div
+            role="status"
+            style={{
+              marginBottom: '10px',
+              color: inlineMessage.tone === 'error' ? '#ffd3ca' : '#dfffee',
+              background: inlineMessage.tone === 'error' ? 'rgba(255,105,91,0.12)' : 'rgba(120,255,190,0.08)',
+              border: inlineMessage.tone === 'error' ? '1px solid rgba(255,105,91,0.32)' : '1px solid rgba(120,255,190,0.22)',
+              borderRadius: '6px',
+              padding: '8px 10px',
+              fontSize: '12px',
+              lineHeight: 1.35,
+            }}
+          >
+            {inlineMessage.text}
+          </div>
+        )}
 
         {(pool.phase === 'idle' || pool.phase === 'finished' || pool.players.length === 0) && (
           <div style={{
@@ -149,18 +173,20 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
             marginBottom: '12px',
           }}>
             <button
+              type="button"
               style={{ ...buttonStyle, height: '74px', textAlign: 'left', ...(!canPay ? disabledStyle : {}) }}
-              disabled={!canPay}
-              onClick={() => eventBus.emit('pool-start-solo')}
+              aria-disabled={!canPay}
+              onClick={() => requestPoolAction('pool-start-solo')}
             >
               <strong>Gioca solo</strong>
               <br />
               Allenamento completo - {POOL_PLAY_COST} petali
             </button>
             <button
+              type="button"
               style={{ ...buttonStyle, height: '74px', textAlign: 'left', ...(!canPay ? disabledStyle : {}) }}
-              disabled={!canPay}
-              onClick={() => eventBus.emit('pool-create-duo')}
+              aria-disabled={!canPay}
+              onClick={() => requestPoolAction('pool-create-duo')}
             >
               <strong>Crea tavolo a due</strong>
               <br />
@@ -190,9 +216,10 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
             </div>
             {!isPlayer && (
               <button
+                type="button"
                 style={{ ...buttonStyle, ...(!canPay ? disabledStyle : {}) }}
-                disabled={!canPay}
-                onClick={() => eventBus.emit('pool-join-duo')}
+                aria-disabled={!canPay}
+                onClick={() => requestPoolAction('pool-join-duo')}
               >
                 Entra - {POOL_PLAY_COST}
               </button>
@@ -236,6 +263,20 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
       </div>
     </div>
   );
+
+  function hidePoolOverlay(): void {
+    setPoolMessage(null);
+    setShowPoolOverlay(false);
+  }
+
+  function requestPoolAction(action: 'pool-start-solo' | 'pool-create-duo' | 'pool-join-duo'): void {
+    if (petals < POOL_PLAY_COST) {
+      setPoolMessage({ text: `Servono ${POOL_PLAY_COST} petali per iniziare`, tone: 'error' });
+      return;
+    }
+    setPoolMessage({ text: 'Richiesta inviata al tavolo...', tone: 'info' });
+    eventBus.emit(action);
+  }
 
   function applyShot(shot: PoolShot): void {
     const next = ballsRef.current.map((ball) => ({ ...ball, vx: 0, vy: 0 }));
