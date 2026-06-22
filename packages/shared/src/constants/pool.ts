@@ -35,6 +35,16 @@ export interface PoolShot {
   createdAt: number;
 }
 
+export interface PoolShotOutcome {
+  userId: string;
+  /** Object balls pocketed on this shot. */
+  potted: number;
+  /** Cue ball was pocketed (scratch). */
+  scratched: boolean;
+  /** The shot was a foul (currently: a scratch). */
+  foul: boolean;
+}
+
 export interface PoolState {
   kind: 'pool';
   phase: PoolPhase;
@@ -47,6 +57,12 @@ export interface PoolState {
   winnerUserId?: string;
   lastShot?: PoolShot;
   message?: string;
+  /** Points per player userId (object balls pocketed, minus foul penalties). */
+  scores: Record<string, number>;
+  /** Foul count per player userId. */
+  fouls: Record<string, number>;
+  /** Result of the most recent resolved shot, for HUD feedback. */
+  lastOutcome?: PoolShotOutcome;
   updatedAt: number;
 }
 
@@ -79,6 +95,8 @@ export function defaultPoolState(now = Date.now()): PoolState {
     mode: 'duo',
     players: [],
     balls: defaultPoolBalls(),
+    scores: {},
+    fouls: {},
     updatedAt: now,
   };
 }
@@ -105,12 +123,133 @@ export function normalizePoolState(value: unknown, now = Date.now()): PoolState 
     winnerUserId: typeof raw.winnerUserId === 'string' ? raw.winnerUserId : undefined,
     lastShot,
     message: typeof raw.message === 'string' ? raw.message.slice(0, 120) : undefined,
+    scores: normalizeScoreMap(raw.scores),
+    fouls: normalizeScoreMap(raw.fouls),
+    lastOutcome: normalizePoolOutcome(raw.lastOutcome),
     updatedAt: numberOr(raw.updatedAt, now),
+  };
+}
+
+function normalizeScoreMap(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object') return {};
+  const out: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof key !== 'string' || typeof raw !== 'number' || !Number.isFinite(raw)) continue;
+    out[key.slice(0, 64)] = Math.max(0, Math.min(999, Math.trunc(raw)));
+  }
+  return out;
+}
+
+function normalizePoolOutcome(value: unknown): PoolShotOutcome | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Partial<PoolShotOutcome>;
+  if (typeof raw.userId !== 'string') return undefined;
+  return {
+    userId: raw.userId.slice(0, 64),
+    potted: Math.max(0, Math.min(7, Math.trunc(numberOr(raw.potted, 0)))),
+    scratched: raw.scratched === true,
+    foul: raw.foul === true,
   };
 }
 
 export function poolStateToObjectState(state: PoolState): ObjectState {
   return state as unknown as ObjectState;
+}
+
+export interface PoolShotResolution {
+  scores: Record<string, number>;
+  fouls: Record<string, number>;
+  outcome: PoolShotOutcome;
+  finished: boolean;
+  keepTurn: boolean;
+  nextTurnUserId: string | undefined;
+  winnerUserId: string | undefined;
+  message: string;
+}
+
+/**
+ * Apply traditional billiards scoring to a resolved shot. Works for both solo
+ * and duo:
+ *  - each object ball pocketed scores +1 for the shooter;
+ *  - pocketing the cue ball (scratch) is a foul: -1 penalty and the turn passes;
+ *  - potting at least one ball cleanly lets the shooter keep the table;
+ *  - clearing every object ball ends the game, highest score wins.
+ */
+export function resolvePoolShot(
+  state: PoolState,
+  shooterId: string,
+  settledBalls: PoolBall[],
+  scratched: boolean,
+): PoolShotResolution {
+  const wasPocketed = new Set(
+    state.balls.filter((ball) => ball.id !== 'cue' && ball.pocketed).map((ball) => ball.id),
+  );
+  const pottedThisShot = settledBalls.filter(
+    (ball) => ball.id !== 'cue' && ball.pocketed && !wasPocketed.has(ball.id),
+  ).length;
+  const remaining = settledBalls.filter((ball) => ball.id !== 'cue' && !ball.pocketed).length;
+  const foul = scratched;
+
+  const scores: Record<string, number> = { ...state.scores };
+  scores[shooterId] = Math.max(0, (scores[shooterId] ?? 0) + pottedThisShot - (foul ? 1 : 0));
+
+  const fouls: Record<string, number> = { ...state.fouls };
+  if (foul) fouls[shooterId] = (fouls[shooterId] ?? 0) + 1;
+
+  const finished = remaining === 0;
+  const keepTurn = !finished && pottedThisShot > 0 && !scratched;
+  const nextTurnUserId = finished
+    ? shooterId
+    : keepTurn
+      ? shooterId
+      : rotatePoolTurn(state, shooterId);
+
+  const winnerUserId = finished ? poolWinnerByScore(state, scores) : state.winnerUserId;
+  const shooterName = state.players.find((player) => player.userId === shooterId)?.username ?? 'Giocatore';
+
+  let message: string;
+  if (finished) {
+    const winnerName = state.players.find((player) => player.userId === winnerUserId)?.username;
+    message = state.players.length > 1 && winnerName
+      ? `Tavolo libero! Vince ${winnerName}`
+      : 'Tavolo libero! Partita conclusa';
+  } else if (scratched) {
+    message = pottedThisShot > 0
+      ? `${shooterName}: fallo, bilia battente in buca (-1)`
+      : `${shooterName}: fallo, bilia battente in buca`;
+  } else if (pottedThisShot >= 2) {
+    message = `${shooterName} imbuca ${pottedThisShot} bilie! Tira ancora`;
+  } else if (pottedThisShot === 1) {
+    message = `${shooterName} imbuca e tira ancora`;
+  } else {
+    message = state.players.length > 1 ? `${shooterName} non imbuca, cambio turno` : `${shooterName} non imbuca`;
+  }
+
+  return {
+    scores,
+    fouls,
+    outcome: { userId: shooterId, potted: pottedThisShot, scratched, foul },
+    finished,
+    keepTurn,
+    nextTurnUserId,
+    winnerUserId,
+    message,
+  };
+}
+
+function rotatePoolTurn(state: PoolState, shooterId: string): string | undefined {
+  if (state.mode === 'solo' || state.players.length < 2) return shooterId;
+  const index = state.players.findIndex((player) => player.userId === shooterId);
+  return state.players[(index + 1) % state.players.length]?.userId ?? state.players[0]?.userId;
+}
+
+function poolWinnerByScore(state: PoolState, scores: Record<string, number>): string | undefined {
+  if (state.players.length === 0) return state.winnerUserId;
+  let best = state.players[0];
+  for (const player of state.players) {
+    if ((scores[player.userId] ?? 0) > (scores[best.userId] ?? 0)) best = player;
+  }
+  return best.userId;
 }
 
 export function serializePoolBalls(balls: readonly PoolBall[]): string {

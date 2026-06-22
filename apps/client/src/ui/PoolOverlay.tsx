@@ -137,6 +137,17 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
     ? pool.players.find((player) => player.userId === pool.winnerUserId)?.username
     : null;
 
+  const showScoreboard = pool.players.length > 0 && (pool.phase === 'playing' || pool.phase === 'finished');
+  const scoreboard = pool.players.map((player) => ({
+    userId: player.userId,
+    username: player.username,
+    score: pool.scores[player.userId] ?? 0,
+    fouls: pool.fouls[player.userId] ?? 0,
+    isTurn: pool.phase === 'playing' && pool.turnUserId === player.userId,
+    isWinner: pool.phase === 'finished' && pool.winnerUserId === player.userId,
+  }));
+  const ballsRemaining = pool.balls.filter((ball) => ball.id !== 'cue' && !ball.pocketed).length;
+
   const turnLabel = pool.phase === 'playing'
     ? pool.turnUserId === userId
       ? 'Tocca a te'
@@ -210,6 +221,69 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
             }}
           >
             {inlineMessage.text}
+          </div>
+        )}
+
+        {showScoreboard && (
+          <div style={{
+            marginBottom: '10px',
+            background: 'rgba(120,255,190,0.05)',
+            border: '1px solid rgba(120,255,190,0.18)',
+            borderRadius: '6px',
+            padding: '8px 10px',
+          }}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'stretch' }}>
+              {scoreboard.map((entry) => (
+                <div
+                  key={entry.userId}
+                  style={{
+                    flex: '1 1 120px',
+                    minWidth: '120px',
+                    borderRadius: '5px',
+                    padding: '6px 8px',
+                    background: entry.isTurn ? 'rgba(255,244,208,0.12)' : 'rgba(255,255,255,0.03)',
+                    border: entry.isWinner
+                      ? '1px solid rgba(136,255,187,0.6)'
+                      : entry.isTurn
+                        ? '1px solid rgba(255,244,208,0.4)'
+                        : '1px solid rgba(255,255,255,0.08)',
+                  }}
+                >
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'baseline',
+                    gap: '6px',
+                  }}>
+                    <span style={{
+                      color: entry.isWinner ? '#bfffe4' : '#fff4d0',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {entry.isWinner ? '🏆 ' : entry.isTurn ? '▸ ' : ''}{entry.username}
+                    </span>
+                    <span style={{ color: '#88ffbb', fontSize: '16px', fontWeight: 700 }}>{entry.score}</span>
+                  </div>
+                  <div style={{ color: '#88caae', fontSize: '10px', marginTop: '2px' }}>
+                    {entry.fouls > 0 ? `Falli: ${entry.fouls}` : 'Nessun fallo'}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: '8px',
+              marginTop: '7px',
+              color: '#88caae',
+              fontSize: '11px',
+            }}>
+              <span>{pool.message ?? `Bilie in tavola: ${ballsRemaining}`}</span>
+              <span>Bilie: {ballsRemaining}</span>
+            </div>
           </div>
         )}
 
@@ -398,11 +472,14 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
     ballsRef.current = initialBalls;
     setMoving(true);
     let last = performance.now();
+    let scratched = false;
 
     const tick = (now: number) => {
       const dt = Math.min(0.026, (now - last) / 1000);
       last = now;
-      const next = stepPhysics(ballsRef.current, dt);
+      const stepped = stepPhysics(ballsRef.current, dt);
+      const next = stepped.balls;
+      if (stepped.scratched) scratched = true;
       ballsRef.current = next;
       setBalls(next.map((ball) => ({ ...ball })));
       draw(next);
@@ -419,7 +496,7 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
       setMoving(false);
       if (syncingShotRef.current) {
         syncingShotRef.current = null;
-        eventBus.emit('pool-sync', settled);
+        eventBus.emit('pool-sync', { balls: settled, scratched });
       }
     };
 
@@ -527,16 +604,17 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
     }
 
     const striking = strikeRef.current;
+    // The cue stick + guide only show while the player is actively lining up a
+    // shot (an aim point is set) or during the strike animation. After a shot
+    // `aimPoint` is cleared, so the stick disappears and only reappears when the
+    // player aims again — it never trails the moving balls.
+    const aiming = canShoot && aimPoint !== null;
     const cue = sourceBalls.find((ball) => ball.id === 'cue' && !ball.pocketed);
-    if (cue && (canShoot || striking)) {
+    if (cue && (aiming || striking)) {
       const cuePoint = ballToCanvas(cue);
-      let angle: number;
-      if (striking) {
-        angle = striking.angle;
-      } else {
-        const target = aimPoint ?? { x: Math.min(TABLE_W - 64, cuePoint.x + 150), y: cuePoint.y };
-        angle = Math.atan2(target.y - cuePoint.y, target.x - cuePoint.x);
-      }
+      const angle = striking
+        ? striking.angle
+        : Math.atan2((aimPoint?.y ?? cuePoint.y) - cuePoint.y, (aimPoint?.x ?? cuePoint.x + 1) - cuePoint.x);
 
       // Clean geometric aim guide: straight line to the first contact (ball or
       // cushion), a ghost ball at impact, and the struck ball's resulting line.
@@ -611,10 +689,11 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
   }
 };
 
-function stepPhysics(balls: PoolBall[], dt: number): PoolBall[] {
+function stepPhysics(balls: PoolBall[], dt: number): { balls: PoolBall[]; scratched: boolean } {
   const next = balls.map((ball) => ({ ...ball }));
   const subSteps = Math.max(1, Math.ceil(dt / MAX_PHYSICS_STEP));
   const subDt = dt / subSteps;
+  let scratched = false;
 
   for (let step = 0; step < subSteps; step++) {
     for (const ball of next) {
@@ -661,6 +740,7 @@ function stepPhysics(balls: PoolBall[], dt: number): PoolBall[] {
             ball.vx = 0;
             ball.vy = 0;
             ball.spin = 0;
+            scratched = true;
           } else {
             ball.pocketed = true;
             ball.vx = 0;
@@ -678,7 +758,7 @@ function stepPhysics(balls: PoolBall[], dt: number): PoolBall[] {
     }
   }
 
-  return next;
+  return { balls: next, scratched };
 }
 
 function drawCueStick(

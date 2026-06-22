@@ -184,6 +184,11 @@ const PETAL_AUTO_COLLECT_CHECK_MS = 32;
 // restart, latency spike) drop the optimistic credit so the flower point can be
 // collected again instead of being blocked forever.
 const PETAL_PENDING_TIMEOUT_MS = 6000;
+// After any auto-collect attempt on a flower point, wait before auto-retrying it.
+// Without this, a server rollback (TOO_FAR / INVALID_PETAL at the edge of range)
+// re-adds the bloom and the 32ms auto-collect loop instantly re-grabs it, firing
+// collect attempts in a burst on the same flower.
+const PETAL_RETRY_COOLDOWN_MS = 1500;
 const PETAL_SPAWN_TICK_MS = 3000;
 const VOICE_MUTE_STORAGE_KEY = 'social-square:voice-muted-users';
 
@@ -196,6 +201,7 @@ export class BarScene extends BaseRoomScene {
   private _exitStations: InteractStation[] = [];
   private _petalBlooms: PetalBloom[] = [];
   private _pendingPetalCollects = new Map<string, PendingPetalCollect>();
+  private _petalAttemptCooldowns = new Map<string, number>();
   private _lastPetalSpawnByLocation = new Map<string, number>();
   private _petalSpawnTimer: Phaser.Time.TimerEvent | null = null;
   private _sipsLeft = 0;
@@ -298,7 +304,7 @@ export class BarScene extends BaseRoomScene {
     eventBus.on('pool-create-duo', () => this._requestPoolStart('pool-create-duo'), this);
     eventBus.on('pool-join-duo', () => this._requestPoolStart('pool-join-duo'), this);
     eventBus.on('pool-shot', (shot: { angle: number; power: number; spin?: number }) => this._requestPoolShot(shot), this);
-    eventBus.on('pool-sync', (balls: PoolBall[]) => this._requestPoolSync(balls), this);
+    eventBus.on('pool-sync', (payload: { balls: PoolBall[]; scratched: boolean }) => this._requestPoolSync(payload), this);
     eventBus.on('pool-leave', () => this._requestPoolLeave(), this);
     useGameStore.getState().clearChatMessages();
 
@@ -578,9 +584,11 @@ export class BarScene extends BaseRoomScene {
     const local = this._localPosition();
     if (!local || this._petalBlooms.length === 0) return;
 
+    const now = Date.now();
     for (const bloom of [...this._petalBlooms]) {
       const key = petalPointKey(bloom.position);
       if (this._pendingPetalCollects.has(key)) continue;
+      if (now < (this._petalAttemptCooldowns.get(key) ?? 0)) continue;
       if (isWithinInteractionRange(local, bloom.position, PETAL_AUTO_COLLECT_RADIUS_TILES)) {
         this._collectPetalBloom(bloom, true);
       }
@@ -608,6 +616,7 @@ export class BarScene extends BaseRoomScene {
       this._spawnPetalCollectBurst(bloom.position, amount);
       this._playPetalCollectSound();
     }
+    this._petalAttemptCooldowns.set(key, Date.now() + PETAL_RETRY_COOLDOWN_MS);
     this._syncPetalPositionForServer();
     this._network?.emitInteract(PETAL_BLOOM_OBJECT_ID, 'petal-collect', {
       x: bloom.position.x,
@@ -621,6 +630,7 @@ export class BarScene extends BaseRoomScene {
     const pending = this._pendingPetalCollects.get(key);
     const bloom = this._petalBlooms.find((candidate) => petalPointKey(candidate.position) === key);
     this._pendingPetalCollects.delete(key);
+    this._petalAttemptCooldowns.delete(key);
     if (bloom) this._removePetalBloom(bloom);
     if (!pending) {
       this._spawnPetalCollectBurst(position, amount);
@@ -909,6 +919,7 @@ export class BarScene extends BaseRoomScene {
     this._petalBlooms.forEach((bloom) => bloom.station.destroy());
     this._petalBlooms = [];
     this._pendingPetalCollects.clear();
+    this._petalAttemptCooldowns.clear();
   }
 
   private _beginSeatInteraction(seat: SeatDefinition): void {
@@ -1224,9 +1235,10 @@ export class BarScene extends BaseRoomScene {
     });
   }
 
-  private _requestPoolSync(balls: PoolBall[]): void {
+  private _requestPoolSync(payload: { balls: PoolBall[]; scratched: boolean }): void {
     this._network?.emitInteract(POOL_OBJECT_ID, 'pool-sync', {
-      balls: serializePoolBalls(balls),
+      balls: serializePoolBalls(payload.balls),
+      scratched: payload.scratched,
     });
   }
 

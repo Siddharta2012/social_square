@@ -36,6 +36,7 @@ import {
   normalizeWaiterState,
   parsePoolBalls,
   poolStateToObjectState,
+  resolvePoolShot,
   parseJukeboxExternalTrack,
   positionToSector,
 } from '@social-square/shared';
@@ -153,12 +154,6 @@ function withJukeboxHistory(next: JukeboxState, requester: string, now: number):
 
 function poolPlayer(state: PoolState, userId: string): PoolState['players'][number] | undefined {
   return state.players.find((player) => player.userId === userId);
-}
-
-function nextPoolTurn(state: PoolState, userId: string): string | undefined {
-  if (state.mode === 'solo' || state.players.length < 2) return userId;
-  const currentIndex = state.players.findIndex((player) => player.userId === userId);
-  return state.players[(currentIndex + 1) % state.players.length]?.userId ?? state.players[0]?.userId;
 }
 
 function poolIsExpired(state: PoolState, now = Date.now()): boolean {
@@ -1168,7 +1163,9 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
 
         const next: PoolState = {
           ...current,
-          turnUserId: nextPoolTurn(current, userId),
+          // Keep the turn with the shooter until the shot resolves (pool-sync);
+          // traditional rules let a clean pot retain the table.
+          turnUserId: userId,
           lastShot: {
             shotId: randomUUID(),
             userId,
@@ -1188,13 +1185,18 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         if (current.phase !== 'playing' || !poolPlayer(current, userId)) return;
         const balls = parsePoolBalls(payload.balls);
         if (!balls) return;
-        const remainingBalls = balls.filter((ball) => ball.id !== 'cue' && !ball.pocketed);
+        const scratched = payload.scratched === true;
+        const resolution = resolvePoolShot(current, userId, balls, scratched);
         await emitPoolState(io, roomId, {
           ...current,
-          phase: remainingBalls.length === 0 ? 'finished' : current.phase,
+          phase: resolution.finished ? 'finished' : current.phase,
           balls,
-          winnerUserId: remainingBalls.length === 0 ? current.lastShot?.userId ?? userId : current.winnerUserId,
-          message: remainingBalls.length === 0 ? 'Partita conclusa' : current.message,
+          turnUserId: resolution.nextTurnUserId,
+          winnerUserId: resolution.winnerUserId,
+          scores: resolution.scores,
+          fouls: resolution.fouls,
+          lastOutcome: resolution.outcome,
+          message: resolution.message,
           updatedAt: now,
         });
         return;
