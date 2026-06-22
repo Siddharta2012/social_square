@@ -24,6 +24,12 @@ interface ElementAudioGraph {
   panner: StereoPannerNode | null;
 }
 
+interface AppliedAudioState {
+  muted: boolean;
+  volume: number;
+  pan: number;
+}
+
 export class VoiceSystem {
   private _room: Room | null = null;
   private _callbacks: VoiceCallbacks = {};
@@ -34,6 +40,7 @@ export class VoiceSystem {
   private _participantSpatial = new Map<string, ParticipantSpatialState>();
   private _participantMuted = new Set<string>();
   private _elementGraphs = new Map<HTMLMediaElement, ElementAudioGraph>();
+  private _lastAppliedAudio = new Map<HTMLMediaElement, AppliedAudioState>();
   private _audioContext: AudioContext | null = null;
 
   setCallbacks(cb: VoiceCallbacks): void {
@@ -139,17 +146,27 @@ export class VoiceSystem {
     const muted = this._participantMuted.has(userId);
     const spatial = this._participantSpatial.get(userId) ?? { volume: 1, pan: 0 };
     elements.forEach((el) => {
-      const graph = this._ensureAudioGraph(el);
       const volume = muted ? 0 : spatial.volume;
-      el.muted = muted || volume <= 0;
+      const targetMuted = muted || volume <= 0;
+      const previous = this._lastAppliedAudio.get(el);
+      const volumeChanged = !previous || Math.abs(previous.volume - volume) > 0.005;
+      const panChanged = !previous || Math.abs(previous.pan - spatial.pan) > 0.005;
+      const mutedChanged = !previous || previous.muted !== targetMuted;
+      if (!volumeChanged && !panChanged && !mutedChanged) return;
+
+      const graph = this._ensureAudioGraph(el);
+      el.muted = targetMuted;
       if (graph) {
         el.volume = 1;
-        graph.gain.gain.setTargetAtTime(volume, graph.context.currentTime, 0.045);
-        graph.panner?.pan.setTargetAtTime(spatial.pan, graph.context.currentTime, 0.06);
-        void graph.context.resume().catch(() => undefined);
+        if (volumeChanged) graph.gain.gain.setTargetAtTime(volume, graph.context.currentTime, 0.045);
+        if (panChanged) graph.panner?.pan.setTargetAtTime(spatial.pan, graph.context.currentTime, 0.06);
+        if (!targetMuted && graph.context.state === 'suspended') {
+          void graph.context.resume().catch(() => undefined);
+        }
       } else {
-        el.volume = volume;
+        if (volumeChanged) el.volume = volume;
       }
+      this._lastAppliedAudio.set(el, { muted: targetMuted, volume, pan: spatial.pan });
     });
   }
 
@@ -192,6 +209,7 @@ export class VoiceSystem {
       graph.gain.disconnect();
       this._elementGraphs.delete(el);
     }
+    this._lastAppliedAudio.delete(el);
     el.remove();
   }
 

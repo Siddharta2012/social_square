@@ -152,10 +152,12 @@ export class NetworkSystem {
   /** Throttled to MOVE_EMIT_INTERVAL ms. */
   emitMove(x: number, y: number, direction: Direction, state: AvatarState, force = false): void {
     if (!this._socket?.connected) return;
+    const now = Date.now();
+    if (!force && this._lastMoveEmit > 0 && now - this._lastMoveEmit < MOVE_EMIT_INTERVAL) return;
+
     const payloadKey = `${x.toFixed(2)}:${y.toFixed(2)}:${direction}:${state}`;
     if (!force && payloadKey === this._lastMovePayloadKey) return;
-    const now = Date.now();
-    if (!force && now - this._lastMoveEmit < MOVE_EMIT_INTERVAL) return;
+
     this._lastMoveEmit = now;
     this._lastMovePayloadKey = payloadKey;
     this._socket.emit('move', { x, y, direction, state });
