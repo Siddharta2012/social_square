@@ -107,6 +107,19 @@ export class MemoryUserRepository implements UserRepository {
     return Promise.resolve({ userPetals: user.petals, ledgerSum });
   }
 
+  repairWalletFloor(userId: string): Promise<StoredUser | null> {
+    const user = this.users.get(userId);
+    if (!user) return Promise.resolve(null);
+    const ledgerSum = this.ledger
+      .filter((entry) => entry.userId === userId)
+      .reduce((sum, entry) => sum + entry.delta, 0);
+    if (ledgerSum <= user.petals) return Promise.resolve(clone(user));
+    const next = { ...clone(user), petals: ledgerSum, updatedAt: Date.now() };
+    this.users.set(userId, next);
+    this.writeCount += 1;
+    return Promise.resolve(clone(next));
+  }
+
   revokeSessions(userId: string): Promise<StoredUser | null> {
     const user = this.users.get(userId);
     if (!user) return Promise.resolve(null);

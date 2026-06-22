@@ -116,4 +116,19 @@ describe('UserService wallet', () => {
 
     expect(repository.writeCount).toBe(0);
   });
+
+  it('repairs a stale zero petal balance from the wallet ledger', async () => {
+    const { repository, service, user } = await createUser();
+
+    await service.awardPetals(user.userId, 125, 'flower', 'award:repair-source');
+    const stored = repository.users.get(user.userId);
+    expect(stored).toBeDefined();
+    repository.users.set(user.userId, { ...stored!, petals: 0 });
+
+    await expect(service.findById(user.userId)).resolves.toMatchObject({ petals: 125 });
+    await expect(service.walletInvariant(user.userId)).resolves.toEqual({
+      userPetals: 125,
+      ledgerSum: 125,
+    });
+  });
 });

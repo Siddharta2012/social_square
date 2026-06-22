@@ -18,11 +18,14 @@ import {
 } from '@social-square/shared';
 import bcrypt from 'bcryptjs';
 import { query, withTransaction } from '../config/database';
+import { redis } from '../config/redis';
+import { logInfo, logWarn } from '../utils/logger';
 import type { AvatarConfig, Position, ProgressActivity, UserProgressSnapshot } from '@social-square/shared';
 import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 const SALT_ROUNDS = 10;
 const STARTING_PETALS = 0;
+const LEGACY_USER_PREFIX = 'user';
 
 export interface StoredProfilePosition extends Position {
   roomId: string;
@@ -106,6 +109,7 @@ export interface UserRepository {
   applyWalletDelta(mutation: WalletMutation): Promise<StoredUser | null>;
   purchaseCosmetic(userId: string, itemId: string, price: number, refId: string): Promise<StoredUser | null>;
   walletInvariant(userId: string): Promise<WalletInvariant | null>;
+  repairWalletFloor(userId: string): Promise<StoredUser | null>;
   revokeSessions(userId: string): Promise<StoredUser | null>;
 }
 
@@ -197,6 +201,24 @@ function defaultStats(raw: Partial<StoredUserStats> | undefined): StoredUserStat
     lastPetalCollectAt: typeof raw?.lastPetalCollectAt === 'number' ? raw.lastPetalCollectAt : 0,
     lastDailyPresenceAt: typeof raw?.lastDailyPresenceAt === 'number' ? raw.lastDailyPresenceAt : 0,
     lastSeenAt: typeof raw?.lastSeenAt === 'number' ? raw.lastSeenAt : Date.now(),
+  };
+}
+
+function mergeStatsFloor(current: StoredUserStats, imported: StoredUserStats): StoredUserStats {
+  return {
+    petalsEarned: Math.max(current.petalsEarned, imported.petalsEarned),
+    petalsSpent: Math.max(current.petalsSpent, imported.petalsSpent),
+    flowerPetalsCollected: Math.max(current.flowerPetalsCollected, imported.flowerPetalsCollected),
+    dailyPresenceClaims: Math.max(current.dailyPresenceClaims, imported.dailyPresenceClaims),
+    barEventsCompleted: Math.max(current.barEventsCompleted, imported.barEventsCompleted),
+    miniTasksCompleted: Math.max(current.miniTasksCompleted, imported.miniTasksCompleted),
+    itemsPurchased: Math.max(current.itemsPurchased, imported.itemsPurchased),
+    waiterOrders: Math.max(current.waiterOrders, imported.waiterOrders),
+    jukeboxPlays: Math.max(current.jukeboxPlays, imported.jukeboxPlays),
+    poolPlays: Math.max(current.poolPlays, imported.poolPlays),
+    lastPetalCollectAt: Math.max(current.lastPetalCollectAt, imported.lastPetalCollectAt),
+    lastDailyPresenceAt: Math.max(current.lastDailyPresenceAt, imported.lastDailyPresenceAt),
+    lastSeenAt: Math.max(current.lastSeenAt, imported.lastSeenAt),
   };
 }
 
@@ -432,7 +454,7 @@ export class PostgresUserRepository implements UserRepository {
 
       const locked = await client.query<UserRow>('SELECT * FROM users WHERE id = $1 FOR UPDATE', [mutation.userId]);
       if (!locked.rows[0]) return null;
-      const current = rowToUser(locked.rows[0]);
+      const current = await this.repairLockedWalletFloor(client, rowToUser(locked.rows[0]));
       const nextStats = statsAfterWalletDelta(current.stats, Math.abs(delta), mutation.reason);
       const updated = await client.query<UserRow>(
         `
@@ -478,13 +500,21 @@ export class PostgresUserRepository implements UserRepository {
     };
   }
 
+  async repairWalletFloor(userId: string): Promise<StoredUser | null> {
+    return withTransaction(async (client) => {
+      const locked = await client.query<UserRow>('SELECT * FROM users WHERE id = $1 FOR UPDATE', [userId]);
+      if (!locked.rows[0]) return null;
+      return this.repairLockedWalletFloor(client, rowToUser(locked.rows[0]));
+    });
+  }
+
   async purchaseCosmetic(userId: string, itemId: string, price: number, refId: string): Promise<StoredUser | null> {
     return withTransaction(async (client) => {
       const replayed = await this.findLedgerReplay(client, userId, refId);
       if (replayed) return replayed;
       const locked = await client.query<UserRow>('SELECT * FROM users WHERE id = $1 FOR UPDATE', [userId]);
       if (!locked.rows[0]) return null;
-      const current = rowToUser(locked.rows[0]);
+      const current = await this.repairLockedWalletFloor(client, rowToUser(locked.rows[0]));
       if (current.unlockedItems.includes(itemId)) return current;
 
       const cost = Math.max(0, Math.trunc(price));
@@ -538,10 +568,32 @@ export class PostgresUserRepository implements UserRepository {
         JOIN users ON users.id = petal_ledger.user_id
         WHERE petal_ledger.user_id = $1
           AND petal_ledger.ref_id = $2
+        FOR UPDATE OF users
       `,
       [userId, refId],
     );
-    return existing.rows[0] ? rowToUser(existing.rows[0]) : null;
+    return existing.rows[0] ? this.repairLockedWalletFloor(client, rowToUser(existing.rows[0])) : null;
+  }
+
+  private async repairLockedWalletFloor(client: PoolClient, user: StoredUser): Promise<StoredUser> {
+    const result = await client.query<{ ledger_sum: string | number }>(
+      'SELECT COALESCE(SUM(delta), 0) AS ledger_sum FROM petal_ledger WHERE user_id = $1',
+      [user.userId],
+    );
+    const ledgerSum = Math.max(0, Math.trunc(Number(result.rows[0]?.ledger_sum ?? 0)));
+    if (ledgerSum <= user.petals) return user;
+
+    const updated = await client.query<UserRow>(
+      'UPDATE users SET petals = $2, updated_at = NOW() WHERE id = $1 AND petals < $2 RETURNING *',
+      [user.userId, ledgerSum],
+    );
+    const repaired = updated.rows[0] ? rowToUser(updated.rows[0]) : user;
+    logWarn('wallet.repaired_from_ledger', {
+      userId: user.userId,
+      previousPetals: user.petals,
+      ledgerSum,
+    });
+    return repaired;
   }
 
   private async applyInitialLedger(userId: string, petals: number): Promise<void> {
@@ -560,19 +612,23 @@ export class UserService {
   constructor(private readonly repository: UserRepository = new PostgresUserRepository()) {}
 
   async findByUsername(username: string): Promise<StoredUser | null> {
-    return this.repository.findByUsername(username);
+    const user = await this.withWalletFloor(await this.repository.findByUsername(username));
+    return user ?? this.importLegacyUser(await this.findLegacyByUsername(username), 'username');
   }
 
   async findById(userId: string): Promise<StoredUser | null> {
-    return this.repository.findById(userId);
+    const user = await this.withWalletFloor(await this.repository.findById(userId));
+    return user ?? this.importLegacyUser(await this.findLegacyById(userId), 'id');
   }
 
   async findByGoogleSub(sub: string): Promise<StoredUser | null> {
-    return this.repository.findByGoogleSub(sub);
+    const user = await this.withWalletFloor(await this.repository.findByGoogleSub(sub));
+    return user ?? this.importLegacyUser(await this.findLegacyByGoogleSub(sub), 'google');
   }
 
   async findByEmail(email: string): Promise<StoredUser | null> {
-    return this.repository.findByEmail(email);
+    const user = await this.withWalletFloor(await this.repository.findByEmail(email));
+    return user ?? this.importLegacyUser(await this.findLegacyByEmail(email), 'email');
   }
 
   async createPasswordUser(username: string, password: string, consent?: ConsentRecord): Promise<StoredUser> {
@@ -936,6 +992,163 @@ export class UserService {
       'INSERT INTO user_progress (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING',
       [userId],
     );
+  }
+
+  private async withWalletFloor(user: StoredUser | null): Promise<StoredUser | null> {
+    if (!user) return null;
+    return (await this.repository.repairWalletFloor(user.userId)) ?? user;
+  }
+
+  private shouldImportLegacyRedis(): boolean {
+    return this.repository instanceof PostgresUserRepository;
+  }
+
+  private legacyIdKey(userId: string): string {
+    return `${LEGACY_USER_PREFIX}:id:${userId}`;
+  }
+
+  private legacyBackupKey(userId: string): string {
+    return `${LEGACY_USER_PREFIX}:backup:${userId}`;
+  }
+
+  private legacyUsernameKey(username: string): string {
+    return `${LEGACY_USER_PREFIX}:${username.toLowerCase()}`;
+  }
+
+  private legacyGoogleKey(sub: string): string {
+    return `${LEGACY_USER_PREFIX}:google:${sub}`;
+  }
+
+  private legacyEmailKey(email: string): string {
+    return `${LEGACY_USER_PREFIX}:email:${email.toLowerCase()}`;
+  }
+
+  private async legacyGet(key: string): Promise<string | null> {
+    if (!this.shouldImportLegacyRedis()) return null;
+    try {
+      return await redis.get(key);
+    } catch (err) {
+      logWarn('auth.legacy_redis_lookup_failed', {
+        key,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
+  private async legacyUserFromKey(key: string): Promise<Partial<StoredUser> | null> {
+    const raw = await this.legacyGet(key);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return parsed && typeof parsed === 'object' ? parsed as Partial<StoredUser> : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async findLegacyById(userId: string): Promise<Partial<StoredUser> | null> {
+    return (await this.legacyUserFromKey(this.legacyIdKey(userId)))
+      ?? this.legacyUserFromKey(this.legacyBackupKey(userId));
+  }
+
+  private async findLegacyByUsername(username: string): Promise<Partial<StoredUser> | null> {
+    return this.legacyUserFromKey(this.legacyUsernameKey(username.trim()));
+  }
+
+  private async findLegacyByGoogleSub(sub: string): Promise<Partial<StoredUser> | null> {
+    const userId = await this.legacyGet(this.legacyGoogleKey(sub));
+    return userId ? this.findLegacyById(userId) : null;
+  }
+
+  private async findLegacyByEmail(email: string): Promise<Partial<StoredUser> | null> {
+    const userId = await this.legacyGet(this.legacyEmailKey(email));
+    return userId ? this.findLegacyById(userId) : null;
+  }
+
+  private async importLegacyUser(raw: Partial<StoredUser> | null, source: string): Promise<StoredUser | null> {
+    if (!raw || !this.shouldImportLegacyRedis()) return null;
+    const legacy = normalizeUser(raw);
+    const existing = await this.findRepositoryConflict(legacy);
+    try {
+      const imported = existing
+        ? await this.mergeLegacyUser(existing, legacy)
+        : await this.createLegacyUser(legacy);
+      logInfo('auth.legacy_redis_user_imported', {
+        source,
+        userId: imported.userId,
+        legacyUserId: legacy.userId,
+        petals: imported.petals,
+      });
+      return imported;
+    } catch (err) {
+      logWarn('auth.legacy_redis_user_import_failed', {
+        source,
+        userId: legacy.userId,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
+  private async findRepositoryConflict(user: StoredUser): Promise<StoredUser | null> {
+    return (await this.repository.findById(user.userId))
+      ?? (user.googleSub ? await this.repository.findByGoogleSub(user.googleSub) : null)
+      ?? (user.email ? await this.repository.findByEmail(user.email) : null)
+      ?? await this.repository.findByUsername(user.username);
+  }
+
+  private async createLegacyUser(legacy: StoredUser): Promise<StoredUser> {
+    const username = await this.uniqueRepositoryUsername(legacy.username);
+    const created = await this.repository.createUser(normalizeUser({
+      ...legacy,
+      username,
+      petals: 0,
+    }));
+    if (legacy.petals <= 0) return created;
+    return (await this.repository.applyWalletDelta({
+      userId: created.userId,
+      delta: legacy.petals,
+      reason: 'legacy-import',
+      refId: `legacy-redis:${legacy.userId}`,
+    })) ?? created;
+  }
+
+  private async mergeLegacyUser(existing: StoredUser, legacy: StoredUser): Promise<StoredUser> {
+    const merged = await this.repository.updateUser(normalizeUser({
+      ...existing,
+      googleSub: existing.googleSub ?? legacy.googleSub,
+      email: existing.email ?? legacy.email,
+      displayName: legacy.displayName ?? existing.displayName,
+      picture: legacy.picture ?? existing.picture,
+      avatarConfig: existing.avatarConfig ?? legacy.avatarConfig,
+      position: existing.position ?? legacy.position,
+      unlockedItems: [...new Set([...existing.unlockedItems, ...legacy.unlockedItems])],
+      stats: mergeStatsFloor(existing.stats, legacy.stats),
+      migratedFromUserId: existing.migratedFromUserId ?? (existing.userId === legacy.userId ? legacy.migratedFromUserId : legacy.userId),
+      ageConfirmedAt: existing.ageConfirmedAt ?? legacy.ageConfirmedAt,
+      tosAcceptedAt: existing.tosAcceptedAt ?? legacy.tosAcceptedAt,
+      updatedAt: Date.now(),
+    }));
+    if (legacy.petals <= merged.petals) return this.withWalletFloor(merged) as Promise<StoredUser>;
+    const funded = await this.repository.applyWalletDelta({
+      userId: merged.userId,
+      delta: legacy.petals - merged.petals,
+      reason: 'legacy-import',
+      refId: `legacy-redis:${legacy.userId}`,
+    });
+    return (await this.withWalletFloor(funded ?? merged)) ?? merged;
+  }
+
+  private async uniqueRepositoryUsername(input: string): Promise<string> {
+    const base = this.cleanUsername(input);
+    const existing = await this.repository.findByUsername(base);
+    if (!existing) return base;
+    for (let i = 2; i < 1000; i++) {
+      const candidate = `${base}${i}`;
+      if (!(await this.repository.findByUsername(candidate))) return candidate;
+    }
+    return `${base}${Date.now().toString(36)}`;
   }
 
   private async findLegacyUserForGoogle(profile: GoogleProfile): Promise<StoredUser | null> {
