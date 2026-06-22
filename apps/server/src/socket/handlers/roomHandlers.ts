@@ -2,11 +2,18 @@ import type { Server, Socket } from 'socket.io';
 import { randomUUID } from 'node:crypto';
 import {
   Direction,
+  BAR_BEER_POSITION,
+  BAR_PRETZEL_POSITION,
+  BAR_SERVICE_OBJECT_ID,
   INTERACTION_RADIUS_TILES,
+  PETAL_ACTION_COST,
+  PETAL_BLOOM_OBJECT_ID,
   JUKEBOX_PLAY_COST,
   JUKEBOX_PLAY_DURATION_MS,
   JUKEBOX_OBJECT_ID,
   JUKEBOX_POSITION,
+  petalPointKey,
+  petalSpawnConfigForLocation,
   ROOM_CONFIGS,
   WAITER_OBJECT_ID,
   filterObjectsByInterest,
@@ -55,6 +62,7 @@ const WAITER_COUNTER: Position = { x: 2, y: 0 };
 const WAITER_TICK_MS = 260;
 const WAITER_SPEED = 5.2;
 const WAITER_BUSY_TTL_MS = 60_000;
+const PETAL_SERVER_COLLECT_RADIUS_TILES = 1.6;
 
 interface WaiterRuntime {
   timers: Array<ReturnType<typeof setTimeout>>;
@@ -91,6 +99,15 @@ function changedSector(a: Position, b: Position): boolean {
   return sectorA.sx !== sectorB.sx || sectorA.sy !== sectorB.sy;
 }
 
+function locationIdFor(position: Position): string {
+  const sector = positionToSector(position);
+  return `${sector.sx},${sector.sy}`;
+}
+
+function isHeldItem(value: unknown): value is Exclude<HeldItem, null> {
+  return value === 'beer' || value === 'pretzel';
+}
+
 function isActiveJukebox(state: ReturnType<typeof normalizeJukeboxState>, now = Date.now()): boolean {
   return state.playing && (state.expiresAt === null || state.expiresAt > now);
 }
@@ -117,6 +134,22 @@ async function ensureUserNear(
     return null;
   }
   return user;
+}
+
+async function persistUserPosition(userId: string, roomId: string, position: Position): Promise<void> {
+  await userService.updatePosition(userId, {
+    roomId,
+    x: position.x,
+    y: position.y,
+    locationId: locationIdFor(position),
+    updatedAt: Date.now(),
+  });
+}
+
+async function savedSpawnFor(userId: string, roomId: string, fallback: Position): Promise<Position> {
+  const user = await userService.findById(userId);
+  if (!user?.position || user.position.roomId !== roomId) return fallback;
+  return { x: user.position.x, y: user.position.y };
 }
 
 function userJoinedPayload(user: RoomUser): Parameters<ServerToClientEvents['user-joined']>[0] {
@@ -501,7 +534,8 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     // Pick spawn point cycling through available slots
     const currentCount = await state.getUserCount(roomId);
     const spawnPoints = roomConfig.spawnPoints;
-    const spawn: Position = spawnPoints[currentCount % spawnPoints.length];
+    const fallbackSpawn: Position = spawnPoints[currentCount % spawnPoints.length];
+    const spawn = await savedSpawnFor(userId, roomId, fallbackSpawn);
 
     const userState = {
       userId,
@@ -511,6 +545,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
       state: 'idle' as const,
     };
     await userService.updateAvatarConfig(userId, userState.avatarConfig);
+    await persistUserPosition(userId, roomId, spawn);
 
     await socket.join(roomId);
     socket.data.currentRoom = roomId;
@@ -539,12 +574,97 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     const roomState = await state.getRoomState(roomId);
     const previous = roomState.users.find((user) => user.userId === userId)?.position ?? { x, y };
     await state.updatePose(roomId, userId, { x, y }, moveState);
+    await persistUserPosition(userId, roomId, { x, y });
     await emitPoseChangeWithInterest(io, socket, roomId, userId, previous, { x, y, direction, state: moveState });
   });
 
   socket.on('interact', async ({ objectId, action, payload }) => {
     const roomId = socket.data.currentRoom;
     if (!roomId) return;
+
+    if (objectId === BAR_SERVICE_OBJECT_ID) {
+      if (action !== 'pickup-item') {
+        socket.emit('error', { code: 'UNKNOWN_INTERACTION', message: 'Azione banco sconosciuta' });
+        return;
+      }
+
+      const item = isHeldItem(payload?.item) ? payload.item : null;
+      if (!item) {
+        socket.emit('error', { code: 'INVALID_ITEM', message: 'Oggetto non valido' });
+        return;
+      }
+
+      const target = item === 'beer' ? BAR_BEER_POSITION : BAR_PRETZEL_POSITION;
+      const buyer = await ensureUserNear(socket, roomId, userId, target, 'Avvicinati al bancone');
+      if (!buyer) return;
+      if (locationIdFor(buyer.position) !== '0,0') {
+        socket.emit('error', { code: 'WRONG_LOCATION', message: 'Il bancone e nel bar' });
+        return;
+      }
+
+      const paidUser = await userService.spendPetals(userId, PETAL_ACTION_COST, 'counter');
+      if (!paidUser) {
+        socket.emit('error', { code: 'INSUFFICIENT_PETALS', message: `Servono ${PETAL_ACTION_COST} petali` });
+        return;
+      }
+
+      await state.updateHeldItem(roomId, userId, item);
+      const roomState = await state.getRoomState(roomId);
+      const holder = roomState.users.find((user) => user.userId === userId);
+      socket.emit('item-granted', { item, petals: paidUser.petals, cost: PETAL_ACTION_COST, source: 'counter' });
+      socket.emit('account-updated', { petals: paidUser.petals, stats: { ...paidUser.stats } });
+      if (holder) await emitHeldItemToInterested(io, roomId, holder, item, roomState.users);
+      return;
+    }
+
+    if (objectId === PETAL_BLOOM_OBJECT_ID) {
+      if (action !== 'petal-collect') {
+        socket.emit('error', { code: 'UNKNOWN_INTERACTION', message: 'Azione petali sconosciuta' });
+        return;
+      }
+
+      const x = typeof payload?.x === 'number' ? payload.x : NaN;
+      const y = typeof payload?.y === 'number' ? payload.y : NaN;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        socket.emit('error', { code: 'INVALID_PETAL', message: 'Petali non validi' });
+        return;
+      }
+
+      const roomUser = await currentRoomUser(roomId, userId);
+      if (!roomUser) return;
+      const locationId = locationIdFor(roomUser.position);
+      const config = petalSpawnConfigForLocation(locationId);
+      const point = config?.points.find((candidate) => (
+        Math.round(candidate.x) === Math.round(x) &&
+        Math.round(candidate.y) === Math.round(y)
+      ));
+      if (!config || !point) {
+        socket.emit('error', { code: 'INVALID_PETAL', message: 'Fiore non disponibile qui' });
+        return;
+      }
+      if (!isWithinInteractionRange(roomUser.position, point, PETAL_SERVER_COLLECT_RADIUS_TILES)) {
+        emitTooFar(socket, 'Avvicinati ai petali');
+        return;
+      }
+
+      const pointKey = petalPointKey(point);
+      const reserved = await state.reservePetalCollect(userId, locationId, pointKey, config.intervalMs);
+      if (!reserved) {
+        socket.emit('error', { code: 'PETAL_COOLDOWN', message: 'Questo fiore deve ricrescere' });
+        return;
+      }
+
+      const nextUser = await userService.awardPetals(userId, config.value, 'flower');
+      if (!nextUser) return;
+      socket.emit('petals-collected', {
+        amount: config.value,
+        petals: nextUser.petals,
+        position: point,
+        source: 'flower',
+      });
+      socket.emit('account-updated', { petals: nextUser.petals, stats: { ...nextUser.stats } });
+      return;
+    }
 
     if (objectId === WAITER_OBJECT_ID) {
       const now = Date.now();
@@ -592,6 +712,13 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
           'Avvicinati al cameriere',
         );
         if (!customer) return;
+
+        const paidUser = await userService.spendPetals(userId, PETAL_ACTION_COST, 'waiter');
+        if (!paidUser) {
+          socket.emit('error', { code: 'INSUFFICIENT_PETALS', message: `Servono ${PETAL_ACTION_COST} petali` });
+          return;
+        }
+        socket.emit('account-updated', { petals: paidUser.petals, stats: { ...paidUser.stats } });
 
         startWaiterOrder(io, roomId, {
           ...current,
@@ -687,12 +814,12 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
       }
 
       if (requiresPayment) {
-        const paidUser = await userService.spendPetals(userId, JUKEBOX_PLAY_COST);
+        const paidUser = await userService.spendPetals(userId, JUKEBOX_PLAY_COST, 'jukebox');
         if (!paidUser) {
           socket.emit('error', { code: 'INSUFFICIENT_PETALS', message: `Servono ${JUKEBOX_PLAY_COST} petali` });
           return;
         }
-        socket.emit('account-updated', { petals: paidUser.petals });
+        socket.emit('account-updated', { petals: paidUser.petals, stats: { ...paidUser.stats } });
       }
 
       await state.updateObjectState(roomId, objectId, next as unknown as ObjectState);
@@ -729,6 +856,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         const previous = roomState.users.find((user) => user.userId === userId)?.position ?? position;
         await state.updateObjectState(roomId, objectId, next);
         await state.updatePose(roomId, userId, position, 'sit');
+        await persistUserPosition(userId, roomId, position);
         await emitObjectStateChangedToInterested(io, roomId, { objectId, state: next }, roomState.users);
         socket.emit('user-moved', {
           userId,
@@ -762,6 +890,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
           const roomState = await state.getRoomState(roomId);
           const previous = roomState.users.find((user) => user.userId === userId)?.position ?? position;
           await state.updatePose(roomId, userId, position, 'idle');
+          await persistUserPosition(userId, roomId, position);
           socket.emit('user-moved', {
             userId,
             x: position.x,

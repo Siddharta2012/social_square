@@ -13,12 +13,15 @@ import { WorldMap } from './WorldMap';
 import {
   INTERACTION_RADIUS_TILES,
   JUKEBOX_OBJECT_ID,
+  PETAL_SPAWN_CONFIGS,
   PETAL_ACTION_COST,
   SEAT_DEFINITIONS,
   isWithinInteractionRange,
 } from './interactions';
 import { sector as barSector } from './sectors/sector_0_0';
 import { sector as gardenSector } from './sectors/sector_0_1';
+import { sector as shopsSector } from './sectors/sector_1_0';
+import { sector as plazaSector } from './sectors/sector_1_1';
 
 describe('phase 2 interaction data', () => {
   it('keeps every declared seat on a walkable tile', () => {
@@ -45,6 +48,20 @@ describe('phase 2 interaction data', () => {
     expect(INTERACTION_RADIUS_TILES).toBeGreaterThan(2);
     expect(isWithinInteractionRange({ x: 16, y: 3 }, { x: 17, y: 4 })).toBe(true);
     expect(isWithinInteractionRange({ x: 16, y: 3 }, { x: 22, y: 8 })).toBe(false);
+  });
+
+  it('keeps configured petal spawn points on walkable tiles', () => {
+    const map = new WorldMap();
+    map.setSector(barSector);
+    map.setSector(gardenSector);
+    map.setSector(shopsSector);
+    map.setSector(plazaSector);
+
+    for (const config of Object.values(PETAL_SPAWN_CONFIGS)) {
+      for (const point of config.points) {
+        expect(map.isWalkable(point.x, point.y), `${config.locationId}:${point.x},${point.y}`).toBe(true);
+      }
+    }
   });
 
   it('normalizes unknown jukebox state to a safe stopped default', () => {

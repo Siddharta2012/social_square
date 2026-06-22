@@ -1,6 +1,6 @@
 import express, { RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
-import type { AvatarConfig } from '@social-square/shared';
+import type { AvatarConfig, Position } from '@social-square/shared';
 import { UserService, type GoogleProfile, type StoredUser } from '../../services/UserService';
 
 const router: express.Router = express.Router();
@@ -47,13 +47,56 @@ function avatarForUser(user: StoredUser): AvatarConfig {
   };
 }
 
+function sanitizeAvatarConfig(user: StoredUser, value: unknown): AvatarConfig | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<AvatarConfig>;
+  const nums = [raw.body, raw.outfit, raw.hair, raw.accessory, raw.expression];
+  if (nums.some((part) => typeof part !== 'number' || !Number.isFinite(part))) return null;
+  if (typeof raw.hairColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(raw.hairColor)) return null;
+  return {
+    userId: user.userId,
+    username: user.username,
+    body: Math.max(0, Math.trunc(raw.body!)),
+    outfit: Math.max(0, Math.trunc(raw.outfit!)),
+    hair: Math.max(0, Math.trunc(raw.hair!)),
+    hairColor: raw.hairColor,
+    accessory: Math.max(0, Math.trunc(raw.accessory!)),
+    expression: Math.max(0, Math.trunc(raw.expression!)),
+  };
+}
+
+function sanitizePosition(value: unknown): (Position & { roomId: string; locationId?: string; updatedAt: number }) | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<Position & { roomId: string; locationId?: string }>;
+  if (
+    typeof raw.roomId !== 'string' ||
+    typeof raw.x !== 'number' ||
+    typeof raw.y !== 'number' ||
+    !Number.isFinite(raw.x) ||
+    !Number.isFinite(raw.y)
+  ) return null;
+  return {
+    roomId: raw.roomId,
+    x: raw.x,
+    y: raw.y,
+    locationId: typeof raw.locationId === 'string' ? raw.locationId : undefined,
+    updatedAt: Date.now(),
+  };
+}
+
 function profilePayload(user: StoredUser): object {
   return {
     userId: user.userId,
     username: user.username,
     petals: user.petals,
     avatarConfig: avatarForUser(user),
+    position: user.position ?? null,
+    unlockedItems: user.unlockedItems,
+    stats: user.stats,
     provider: user.provider,
+    email: user.email,
+    displayName: user.displayName,
+    picture: user.picture,
   };
 }
 
@@ -103,14 +146,84 @@ const petalsHandler: RequestHandler = async (req, res) => {
     return;
   }
 
-  const delta = typeof req.body?.delta === 'number' ? Math.trunc(req.body.delta) : NaN;
-  if (!Number.isFinite(delta) || Math.abs(delta) > 1000) {
-    res.status(400).json({ error: 'Delta petali non valido' });
+  res.status(410).json({ error: 'WALLET_SERVER_SIDE_ONLY' });
+};
+
+const profileHandler: RequestHandler = async (req, res) => {
+  const user = await userFromRequest(req);
+  if (!user) {
+    res.status(401).json({ error: 'AUTH_REQUIRED' });
+    return;
+  }
+  res.json(profilePayload(user));
+};
+
+const updateProfileHandler: RequestHandler = async (req, res) => {
+  const user = await userFromRequest(req);
+  if (!user) {
+    res.status(401).json({ error: 'AUTH_REQUIRED' });
     return;
   }
 
-  const next = await userService.adjustPetals(user.userId, delta);
-  res.json({ petals: next?.petals ?? user.petals });
+  const avatarConfig = req.body?.avatarConfig === undefined
+    ? undefined
+    : sanitizeAvatarConfig(user, req.body.avatarConfig);
+  const position = req.body?.position === undefined
+    ? undefined
+    : sanitizePosition(req.body.position);
+
+  if (req.body?.avatarConfig !== undefined && !avatarConfig) {
+    res.status(400).json({ error: 'INVALID_AVATAR' });
+    return;
+  }
+  if (req.body?.position !== undefined && !position) {
+    res.status(400).json({ error: 'INVALID_POSITION' });
+    return;
+  }
+
+  const patch: Parameters<UserService['updateProfile']>[1] = {};
+  if (avatarConfig) patch.avatarConfig = avatarConfig;
+  if (position) patch.position = position;
+  const updated = await userService.updateProfile(user.userId, patch);
+  res.json(profilePayload(updated ?? user));
+};
+
+const updateAvatarHandler: RequestHandler = async (req, res) => {
+  const user = await userFromRequest(req);
+  if (!user) {
+    res.status(401).json({ error: 'AUTH_REQUIRED' });
+    return;
+  }
+  const avatarConfig = sanitizeAvatarConfig(user, req.body?.avatarConfig);
+  if (!avatarConfig) {
+    res.status(400).json({ error: 'INVALID_AVATAR' });
+    return;
+  }
+  const updated = await userService.updateAvatarConfig(user.userId, avatarConfig);
+  res.json(profilePayload(updated ?? user));
+};
+
+const dailyPresenceHandler: RequestHandler = async (req, res) => {
+  const user = await userFromRequest(req);
+  if (!user) {
+    res.status(401).json({ error: 'AUTH_REQUIRED' });
+    return;
+  }
+  const result = await userService.claimDailyPresence(user.userId);
+  if (!result) {
+    res.status(404).json({ error: 'USER_NOT_FOUND' });
+    return;
+  }
+  res.json({
+    awarded: result.awarded,
+    petals: result.user.petals,
+    stats: result.user.stats,
+    nextAt: result.nextAt,
+  });
+};
+
+const logoutHandler: RequestHandler = (_req, res) => {
+  res.json({ ok: true });
 };
 
 const loginHandler: RequestHandler = async (req, res) => {
@@ -224,6 +337,11 @@ const googleCallbackHandler: RequestHandler = async (req, res) => {
 router.get('/config', configHandler);
 router.get('/me', meHandler);
 router.post('/petals', petalsHandler);
+router.get('/profile', profileHandler);
+router.patch('/profile', updateProfileHandler);
+router.patch('/profile/avatar', updateAvatarHandler);
+router.post('/profile/daily', dailyPresenceHandler);
+router.post('/logout', logoutHandler);
 router.post('/login', loginHandler);
 router.get('/google/start', googleStartHandler);
 router.get('/google/callback', googleCallbackHandler);

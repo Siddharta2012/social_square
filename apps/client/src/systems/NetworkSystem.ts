@@ -37,6 +37,8 @@ export interface NetworkCallbacks {
   }) => void;
   onRoomUsersCount?: (data: { roomId: string; count: number }) => void;
   onUserHeldItem?: (data: { userId: string; item: HeldItem }) => void;
+  onItemGranted?: (data: { item: Exclude<HeldItem, null>; petals?: number; cost: number; source: 'counter' | 'waiter' }) => void;
+  onPetalsCollected?: (data: { amount: number; petals: number; position: Position; source: 'flower' | 'daily' | 'event' | 'task' }) => void;
   onObjectStateChanged?: (data: { objectId: string; state: ObjectState }) => void;
   onUserEmote?: (data: { userId: string; emoteId: EmoteId }) => void;
   onUserChatMessage?: (data: ChatMessage) => void;
@@ -76,6 +78,8 @@ export class NetworkSystem {
     this._socket.on('user-moved', (data) => this._callbacks.onUserMoved?.(data));
     this._socket.on('room-users-count', (data) => this._callbacks.onRoomUsersCount?.(data));
     this._socket.on('user-held-item', (data) => this._callbacks.onUserHeldItem?.(data));
+    this._socket.on('item-granted', (data) => this._callbacks.onItemGranted?.(data));
+    this._socket.on('petals-collected', (data) => this._callbacks.onPetalsCollected?.(data));
     this._socket.on('object-state-changed', (data) => this._callbacks.onObjectStateChanged?.(data));
     this._socket.on('user-emote', (data) => this._callbacks.onUserEmote?.(data));
     this._socket.on('user-chat-message', (data) => this._callbacks.onUserChatMessage?.(data));

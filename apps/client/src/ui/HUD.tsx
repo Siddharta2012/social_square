@@ -16,7 +16,7 @@ import { VoiceControls } from './VoiceControls';
 import { AudioSettingsModal } from './AudioSettingsModal';
 import { eventBus } from '../eventBus';
 import { fastTravelLocations } from '../world/locations';
-import { fetchAccountProfile } from '../api/account';
+import { claimDailyPresence, fetchAccountProfile, logoutAccount } from '../api/account';
 
 type MobilePanel = 'actions' | 'chat' | null;
 
@@ -54,6 +54,7 @@ export const HUD: React.FC = () => {
   const token = useUserStore((s) => s.token);
   const setUser = useUserStore((s) => s.setUser);
   const setAvatarConfig = useUserStore((s) => s.setAvatarConfig);
+  const clearUser = useUserStore((s) => s.clearUser);
   const setPetals = useGameStore((s) => s.setPetals);
   const [chatDraft, setChatDraft] = useState('');
   const [showJukeboxLink, setShowJukeboxLink] = useState(false);
@@ -62,6 +63,7 @@ export const HUD: React.FC = () => {
   const [clockNow, setClockNow] = useState(Date.now());
   const [isCompactHud, setIsCompactHud] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
+  const [dailyPresenceMsg, setDailyPresenceMsg] = useState('');
 
   const inRoom = currentRoomId !== null;
   const travelOptions = fastTravelLocations();
@@ -158,6 +160,28 @@ export const HUD: React.FC = () => {
   };
 
   const handleExit = () => { eventBus.emit('exit-room'); };
+
+  const handleLogout = () => {
+    void logoutAccount(token).finally(() => {
+      if (inRoom) eventBus.emit('exit-room');
+      clearUser();
+      setPetals(0);
+      setShowAuthForm(true);
+      setMobilePanel(null);
+    });
+  };
+
+  const handleDailyPresence = () => {
+    setDailyPresenceMsg('');
+    void claimDailyPresence(token).then((result) => {
+      if (!result) {
+        setDailyPresenceMsg('Non disponibile');
+        return;
+      }
+      setPetals(result.petals);
+      setDailyPresenceMsg(result.awarded ? '+100 presenza' : 'Gia preso oggi');
+    });
+  };
 
   const handleVoiceToggle = () => {
     eventBus.emit('voice-toggle');
@@ -438,6 +462,9 @@ export const HUD: React.FC = () => {
               <button style={smallButtonStyle} onClick={() => setShowWorldMap(!showWorldMap)}>
                 Mappa
               </button>
+              <button style={smallButtonStyle} onClick={handleDailyPresence} title={dailyPresenceMsg || 'Bonus presenza'}>
+                Presenza
+              </button>
               <button
                 style={{
                   ...smallButtonStyle,
@@ -502,6 +529,17 @@ export const HUD: React.FC = () => {
               onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,80,80,0.15)')}
             >
               Esci
+            </button>
+            <button
+              onClick={handleLogout}
+              style={{
+                background: 'rgba(150,150,255,0.1)',
+                border: '1px solid rgba(150,150,255,0.35)',
+                color: '#aaaaff', fontFamily: 'monospace', fontSize: '11px',
+                padding: '4px 10px', cursor: 'pointer', borderRadius: '3px',
+              }}
+            >
+              Account
             </button>
           </div>
         </div>
@@ -597,6 +635,19 @@ export const HUD: React.FC = () => {
                 <button style={smallButtonStyle} onClick={() => emitEmote('clap')}>Applauso</button>
               </div>
 
+              <button
+                style={{
+                  ...smallButtonStyle,
+                  width: '100%',
+                  height: '36px',
+                  marginBottom: '8px',
+                  color: dailyPresenceMsg.startsWith('+') ? '#ffe14d' : '#aaaaff',
+                }}
+                onClick={handleDailyPresence}
+              >
+                {dailyPresenceMsg || 'Bonus presenza'}
+              </button>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', marginBottom: '8px' }}>
                 <button
                   style={{ ...smallButtonStyle, ...(!canUseJukebox || jukeboxActive ? disabledButtonStyle : {}) }}
@@ -675,6 +726,17 @@ export const HUD: React.FC = () => {
                 }}
               >
                 Esci
+              </button>
+              <button
+                onClick={handleLogout}
+                style={{
+                  ...smallButtonStyle,
+                  width: '100%',
+                  height: '36px',
+                  marginTop: '7px',
+                }}
+              >
+                Cambia account
               </button>
             </div>
           )}

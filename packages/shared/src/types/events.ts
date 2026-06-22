@@ -79,9 +79,11 @@ export interface ServerToClientEvents {
   'object-state-changed': (data: { objectId: string; state: ObjectState }) => void;
   'user-emote': (data: { userId: string; emoteId: EmoteId }) => void;
   'user-held-item': (data: { userId: string; item: HeldItem }) => void;
+  'item-granted': (data: { item: Exclude<HeldItem, null>; petals?: number; cost: number; source: 'counter' | 'waiter' }) => void;
+  'petals-collected': (data: { amount: number; petals: number; position: Position; source: 'flower' | 'daily' | 'event' | 'task' }) => void;
   'user-chat-message': (data: ChatMessage) => void;
   'room-users-count': (data: { roomId: string; count: number }) => void;
-  'account-updated': (data: { petals?: number; avatarConfig?: AvatarConfig }) => void;
+  'account-updated': (data: { petals?: number; avatarConfig?: AvatarConfig; stats?: Record<string, number> }) => void;
   'error': (data: { code: string; message: string }) => void;
 }
 

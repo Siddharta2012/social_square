@@ -66,8 +66,6 @@ interface GameState {
   setTravelTargetName: (name: string | null) => void;
   setUsersInRoom: (count: number) => void;
   setPetals: (amount: number) => void;
-  addPetals: (amount: number) => void;
-  spendPetals: (amount: number) => boolean;
   setShowUsernameForm: (show: boolean) => void;
   setShowAuthForm: (show: boolean) => void;
   setVoiceAvailable: (v: boolean) => void;
@@ -121,19 +119,6 @@ export const useGameStore = create<GameState>((set) => ({
   setTravelTargetName: (name) => set({ travelTargetName: name }),
   setUsersInRoom: (count) => set({ usersInRoom: count }),
   setPetals: (amount) => set({ petals: Math.max(0, Math.floor(amount)) }),
-  addPetals: (amount) => set((state) => ({
-    petals: Math.max(0, state.petals + Math.max(0, Math.floor(amount))),
-  })),
-  spendPetals: (amount) => {
-    const cost = Math.max(0, Math.floor(amount));
-    let spent = false;
-    set((state) => {
-      if (state.petals < cost) return {};
-      spent = true;
-      return { petals: state.petals - cost };
-    });
-    return spent;
-  },
   setShowUsernameForm: (show) => set({ showUsernameForm: show }),
   setShowAuthForm: (show) => set({ showAuthForm: show }),
   setVoiceAvailable: (v) => set({ voiceAvailable: v }),

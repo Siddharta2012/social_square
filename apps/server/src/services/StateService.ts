@@ -21,6 +21,10 @@ export class StateService {
     return `room:${roomId}:objects`;
   }
 
+  private petalCollectKey(userId: string, locationId: string, pointKey: string): string {
+    return `wallet:petal:${userId}:${locationId}:${pointKey}`;
+  }
+
   async addUser(roomId: string, userState: UserState): Promise<void> {
     const k = this.userKey(roomId);
     await redis.hset(k, userState.userId, JSON.stringify(userState));
@@ -113,5 +117,18 @@ export class StateService {
 
   async getUserCount(roomId: string): Promise<number> {
     return redis.hlen(this.userKey(roomId));
+  }
+
+  async reservePetalCollect(
+    userId: string,
+    locationId: string,
+    pointKey: string,
+    cooldownMs: number,
+  ): Promise<boolean> {
+    const key = this.petalCollectKey(userId, locationId, pointKey);
+    const existing = await redis.get(key);
+    if (existing) return false;
+    await redis.set(key, '1', 'PX', Math.max(1000, Math.trunc(cooldownMs)));
+    return true;
   }
 }

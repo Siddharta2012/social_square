@@ -1,11 +1,18 @@
 export {
   INTERACTION_RADIUS_TILES,
+  BAR_BEER_POSITION,
+  BAR_PRETZEL_POSITION,
+  BAR_SERVICE_OBJECT_ID,
   JUKEBOX_OBJECT_ID,
   JUKEBOX_POSITION,
   PETAL_ACTION_COST,
+  PETAL_BLOOM_OBJECT_ID,
   PETAL_BLOOM_VALUE,
+  PETAL_SPAWN_CONFIGS,
   SEAT_DEFINITIONS,
   isSeatObjectId,
   isWithinInteractionRange,
+  petalPointKey,
+  petalSpawnConfigForLocation,
 } from '@social-square/shared';
 export type { SeatDefinition } from '@social-square/shared';

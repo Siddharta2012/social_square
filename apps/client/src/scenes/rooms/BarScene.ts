@@ -6,7 +6,11 @@
 
 import {
   Direction,
+  BAR_BEER_POSITION,
+  BAR_PRETZEL_POSITION,
+  BAR_SERVICE_OBJECT_ID,
   JUKEBOX_PLAY_COST,
+  PETAL_BLOOM_OBJECT_ID,
   WAITER_OBJECT_ID,
   jukeboxTitle,
   normalizeJukeboxState,
@@ -26,7 +30,6 @@ import type {
   WaiterState,
 } from '@social-square/shared';
 import { JukeboxPlayer } from '../../audio/JukeboxPlayer';
-import { adjustAccountPetals } from '../../api/account';
 import { useUserStore } from '../../store/userStore';
 import { useGameStore } from '../../store/gameStore';
 import { eventBus } from '../../eventBus';
@@ -40,10 +43,11 @@ import {
   JUKEBOX_OBJECT_ID,
   JUKEBOX_POSITION,
   PETAL_ACTION_COST,
-  PETAL_BLOOM_VALUE,
   SEAT_DEFINITIONS,
   isSeatObjectId,
   isWithinInteractionRange,
+  petalPointKey,
+  petalSpawnConfigForLocation,
   type SeatDefinition,
 } from '../../world/interactions';
 import {
@@ -161,20 +165,9 @@ interface PetalBloom {
   position: Position;
 }
 
-const PETAL_MAX_ACTIVE = 5;
-const PETAL_SPAWN_INTERVAL_MS = 9000;
 const PETAL_COLLECT_RADIUS_TILES = 2.75;
 const PETAL_AUTO_COLLECT_RADIUS_TILES = 1.05;
-const PETAL_SPAWN_POINTS: Position[] = [
-  { x: 3, y: 35 },
-  { x: 12, y: 30 },
-  { x: 20, y: 42 },
-  { x: 11, y: 43 },
-  { x: 28, y: 33 },
-  { x: 35, y: 42 },
-  { x: 41, y: 30 },
-  { x: 44, y: 14 },
-];
+const PETAL_SPAWN_TICK_MS = 3000;
 
 export class BarScene extends BaseRoomScene {
   private _network!: NetworkSystem;
@@ -184,6 +177,8 @@ export class BarScene extends BaseRoomScene {
   private _stations: InteractStation[] = [];
   private _exitStations: InteractStation[] = [];
   private _petalBlooms: PetalBloom[] = [];
+  private _pendingPetalCollects = new Set<string>();
+  private _lastPetalSpawnByLocation = new Map<string, number>();
   private _petalSpawnTimer: Phaser.Time.TimerEvent | null = null;
   private _sipsLeft = 0;
   private _jukebox = new JukeboxPlayer();
@@ -342,23 +337,23 @@ export class BarScene extends BaseRoomScene {
 
     if (locationId === '0,0') {
       this._stations.push(new InteractStation({
-        scene: this, worldX: 2, worldY: 0,
+        scene: this, worldX: BAR_BEER_POSITION.x, worldY: BAR_BEER_POSITION.y,
         label: `Spillatore - ${PETAL_ACTION_COST} petali`,
         draw: drawBeerTap,
         hitWidth: 26, hitHeight: 60,
         depth: BarScene.COUNTER_FIXTURE_DEPTH,
         ambientGlow: true,
-        onInteract: () => this._pickUpFromStation('beer', { x: 2, y: 0 }),
+        onInteract: () => this._pickUpFromStation('beer', BAR_BEER_POSITION),
       }));
 
       this._stations.push(new InteractStation({
-        scene: this, worldX: 6, worldY: 0,
+        scene: this, worldX: BAR_PRETZEL_POSITION.x, worldY: BAR_PRETZEL_POSITION.y,
         label: `Pretzel - ${PETAL_ACTION_COST} petali`,
         draw: drawPretzelStand,
         hitWidth: 30, hitHeight: 44,
         depth: BarScene.COUNTER_FIXTURE_DEPTH,
         ambientGlow: true,
-        onInteract: () => this._pickUpFromStation('pretzel', { x: 6, y: 0 }),
+        onInteract: () => this._pickUpFromStation('pretzel', BAR_PRETZEL_POSITION),
       }));
 
       this._stations.push(new InteractStation({
@@ -394,22 +389,16 @@ export class BarScene extends BaseRoomScene {
       return;
     }
 
-    this._pickUp(item, true);
+    this._network?.emitInteract(BAR_SERVICE_OBJECT_ID, 'pickup-item', { item });
   }
 
-  private _pickUp(item: HeldItem, chargePetals = false): void {
+  private _pickUp(item: HeldItem): void {
     if (!item) return;
-    if (chargePetals && !this._trySpendPetals()) return;
 
     this._sipsLeft = item === 'beer' ? BarScene.BEER_SIPS : BarScene.PRETZEL_BITES;
     this.localAvatar.setHeldItem(item, 1);
     useGameStore.getState().setHeldItem(item);
     this._network.emitHoldItem(item);
-
-    if (chargePetals) {
-      const label = item === 'beer' ? 'Birra' : 'Pretzel';
-      this._showNotice(`${label}: -${PETAL_ACTION_COST} petali`);
-    }
   }
 
   private _consume(): void {
@@ -466,46 +455,38 @@ export class BarScene extends BaseRoomScene {
     store.setActionAvailability({ nearJukebox, nearWaiter, canAffordAction });
   }
 
-  private _trySpendPetals(cost = PETAL_ACTION_COST): boolean {
-    const store = useGameStore.getState();
-    if (store.petals < cost) {
-      this._showNotice(`Servono ${cost} petali`);
-      return false;
-    }
-
-    if (!store.spendPetals(cost)) {
-      this._showNotice(`Servono ${cost} petali`);
-      return false;
-    }
-
-    this._persistPetalDelta(-cost);
-    this._syncLocalContext();
-    return true;
-  }
-
-  private _persistPetalDelta(delta: number): void {
-    const token = useUserStore.getState().token;
-    void adjustAccountPetals(token, delta).then((petals) => {
-      if (petals !== null) useGameStore.getState().setPetals(petals);
-    });
-  }
-
   private _startPetalSpawns(): void {
-    this.time.delayedCall(1200, () => {
-      for (let i = 0; i < 4; i++) this._spawnPetalBloom();
-    });
+    this.time.delayedCall(1200, () => this._seedPetalBloomsForLocation());
 
     this._petalSpawnTimer = this.time.addEvent({
-      delay: PETAL_SPAWN_INTERVAL_MS,
+      delay: PETAL_SPAWN_TICK_MS,
       loop: true,
-      callback: () => this._spawnPetalBloom(),
+      callback: () => this._maybeSpawnPetalBloom(),
     });
   }
 
-  private _spawnPetalBloom(): void {
-    if (this._petalBlooms.length >= PETAL_MAX_ACTIVE) return;
+  private _seedPetalBloomsForLocation(): void {
+    const config = petalSpawnConfigForLocation(this._currentLocationId());
+    if (!config) return;
+    for (let i = 0; i < config.initialActive; i++) this._spawnPetalBloom();
+    this._lastPetalSpawnByLocation.set(config.locationId, Date.now());
+  }
 
-    const available = PETAL_SPAWN_POINTS.filter((point) => {
+  private _maybeSpawnPetalBloom(): void {
+    const locationId = this._currentLocationId();
+    const config = petalSpawnConfigForLocation(locationId);
+    if (!config) return;
+    const last = this._lastPetalSpawnByLocation.get(locationId) ?? 0;
+    if (Date.now() - last < config.intervalMs) return;
+    if (this._spawnPetalBloom()) this._lastPetalSpawnByLocation.set(locationId, Date.now());
+  }
+
+  private _spawnPetalBloom(): boolean {
+    const config = petalSpawnConfigForLocation(this._currentLocationId());
+    if (!config) return false;
+    if (this._petalBlooms.length >= config.maxActive) return false;
+
+    const available = config.points.filter((point) => {
       const occupied = this._petalBlooms.some((bloom) => (
         Math.round(bloom.position.x) === Math.round(point.x) &&
         Math.round(bloom.position.y) === Math.round(point.y)
@@ -514,7 +495,7 @@ export class BarScene extends BaseRoomScene {
       const tile = this.worldMap.getTile(Math.round(point.x), Math.round(point.y));
       return tile?.walkable === true;
     });
-    if (available.length === 0) return;
+    if (available.length === 0) return false;
 
     const index = Phaser.Math.Between(0, available.length - 1);
     const position = { ...available[index] };
@@ -523,7 +504,7 @@ export class BarScene extends BaseRoomScene {
       scene: this,
       worldX: position.x,
       worldY: position.y,
-      label: `Petali +${PETAL_BLOOM_VALUE}`,
+      label: `Petali +${config.value}`,
       draw: drawPetalBloom,
       hitWidth: 38,
       hitHeight: 42,
@@ -533,6 +514,7 @@ export class BarScene extends BaseRoomScene {
 
     bloom = { station, position };
     this._petalBlooms.push(bloom);
+    return true;
   }
 
   private _collectNearbyPetals(): void {
@@ -540,6 +522,8 @@ export class BarScene extends BaseRoomScene {
     if (!local || this._petalBlooms.length === 0) return;
 
     for (const bloom of [...this._petalBlooms]) {
+      const key = petalPointKey(bloom.position);
+      if (this._pendingPetalCollects.has(key)) continue;
       if (isWithinInteractionRange(local, bloom.position, PETAL_AUTO_COLLECT_RADIUS_TILES)) {
         this._collectPetalBloom(bloom, true);
       }
@@ -552,17 +536,32 @@ export class BarScene extends BaseRoomScene {
       return;
     }
 
-    this._petalBlooms = this._petalBlooms.filter((candidate) => candidate !== bloom);
-    this._spawnPetalCollectBurst(bloom.position);
+    const key = petalPointKey(bloom.position);
+    if (this._pendingPetalCollects.has(key)) return;
+    this._pendingPetalCollects.add(key);
+    this._network?.emitInteract(PETAL_BLOOM_OBJECT_ID, 'petal-collect', {
+      x: bloom.position.x,
+      y: bloom.position.y,
+    });
+    this.time.delayedCall(1800, () => this._pendingPetalCollects.delete(key));
+  }
+
+  private _confirmPetalCollected(position: Position, amount: number, petals: number): void {
+    const key = petalPointKey(position);
+    const bloom = this._petalBlooms.find((candidate) => petalPointKey(candidate.position) === key);
+    this._pendingPetalCollects.delete(key);
+    if (bloom) {
+      this._petalBlooms = this._petalBlooms.filter((candidate) => candidate !== bloom);
+      bloom.station.destroy();
+    }
+    this._spawnPetalCollectBurst(position, amount);
     this._playPetalCollectSound();
-    bloom.station.destroy();
-    useGameStore.getState().addPetals(PETAL_BLOOM_VALUE);
-    this._persistPetalDelta(PETAL_BLOOM_VALUE);
-    this._showNotice(`+${PETAL_BLOOM_VALUE} petali`);
+    useGameStore.getState().setPetals(petals);
+    this._showNotice(`+${amount} petali`);
     this._syncLocalContext();
   }
 
-  private _spawnPetalCollectBurst(position: Position): void {
+  private _spawnPetalCollectBurst(position: Position, amount: number): void {
     const iso = IsometricSystem.worldToIso(position.x, position.y);
     const colors = [0xffd166, 0xe85d75, 0x9b7cff, 0xffffff, 0x88ffbb];
 
@@ -587,7 +586,7 @@ export class BarScene extends BaseRoomScene {
       });
     }
 
-    const text = this.add.text(iso.x, iso.y - 46, `+${PETAL_BLOOM_VALUE}`, {
+    const text = this.add.text(iso.x, iso.y - 46, `+${amount}`, {
       fontSize: '18px',
       color: '#fff4d0',
       fontFamily: 'monospace',
@@ -755,6 +754,7 @@ export class BarScene extends BaseRoomScene {
     }
     this._rebuildLocationStations();
     this._rebuildExitStations();
+    this._seedPetalBloomsForLocation();
     this._applyWaiterState(this._waiterState);
     this._syncJukeboxForLocation();
     this._syncLocalContext();
@@ -774,6 +774,7 @@ export class BarScene extends BaseRoomScene {
   private _clearPetalBlooms(): void {
     this._petalBlooms.forEach((bloom) => bloom.station.destroy());
     this._petalBlooms = [];
+    this._pendingPetalCollects.clear();
   }
 
   private _beginSeatInteraction(seat: SeatDefinition): void {
@@ -876,7 +877,6 @@ export class BarScene extends BaseRoomScene {
       this._showNotice('Avvicinati al cameriere');
       return;
     }
-    if (!this._trySpendPetals()) return;
 
     this._network?.emitInteract(WAITER_OBJECT_ID, 'waiter-order', {
       item,
@@ -936,7 +936,7 @@ export class BarScene extends BaseRoomScene {
       !this._deliveredOrderIds.has(waiter.orderId)
     ) {
       this._deliveredOrderIds.add(waiter.orderId);
-      this._pickUp(waiter.item, false);
+      this._pickUp(waiter.item);
       this._showNotice(`${waiter.item === 'beer' ? 'Birra' : 'Pretzel'} consegnato`);
     }
   }
@@ -1199,6 +1199,18 @@ export class BarScene extends BaseRoomScene {
         this._remoteAvatars.get(userId)?.setHeldItem(item ?? null);
       },
 
+      onItemGranted: ({ item, petals, cost }) => {
+        this._pickUp(item);
+        if (typeof petals === 'number') useGameStore.getState().setPetals(petals);
+        const label = item === 'beer' ? 'Birra' : 'Pretzel';
+        this._showNotice(`${label}: -${cost} petali`);
+        this._syncLocalContext();
+      },
+
+      onPetalsCollected: ({ amount, petals, position }) => {
+        this._confirmPetalCollected(position, amount, petals);
+      },
+
       onObjectStateChanged: ({ objectId, state }) => {
         this._applyObjectState(objectId, state);
       },
@@ -1219,6 +1231,9 @@ export class BarScene extends BaseRoomScene {
 
       onError: ({ code, message }) => {
         console.error(`[Network] ${code}: ${message}`);
+        if (code === 'PETAL_COOLDOWN' || code === 'INVALID_PETAL' || code === 'TOO_FAR') {
+          this._pendingPetalCollects.clear();
+        }
         if (message) this._showNotice(message);
       },
     });
