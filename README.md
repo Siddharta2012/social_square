@@ -56,6 +56,8 @@ pnpm build
 ## Deploy
 
 Railway builds shared, client, and server, then serves the built client from the
-Express server. Readiness is exposed at `/api/ready`; liveness is `/api/health`.
+Express server. The deploy start command runs `scripts/migrate.mjs` before
+starting Express, so Postgres schema changes are applied idempotently on boot.
+Readiness is exposed at `/api/ready`; liveness is `/api/health`.
 
 More detail: `docs/architecture/overview.md` and `docs/architecture/state.md`.

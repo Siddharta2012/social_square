@@ -24,6 +24,7 @@ export function requestPoolOpen(this: any): void {
     return;
   }
   const store = useGameStore.getState();
+  this.movementSystem.stopMovement();
   store.setPoolMessage(null);
   store.setShowPoolOverlay(true);
 }

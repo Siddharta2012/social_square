@@ -110,6 +110,7 @@ export interface UserRepository {
   purchaseCosmetic(userId: string, itemId: string, price: number, refId: string): Promise<StoredUser | null>;
   walletInvariant(userId: string): Promise<WalletInvariant | null>;
   repairWalletFloor(userId: string): Promise<StoredUser | null>;
+  findWalletReplay(userId: string, refIds: string[]): Promise<StoredUser | null>;
   revokeSessions(userId: string): Promise<StoredUser | null>;
 }
 
@@ -508,6 +509,24 @@ export class PostgresUserRepository implements UserRepository {
     });
   }
 
+  async findWalletReplay(userId: string, refIds: string[]): Promise<StoredUser | null> {
+    const safeRefs = [...new Set(refIds.filter((refId) => refId.length > 0))];
+    if (safeRefs.length === 0) return null;
+    const result = await oneUser(query<UserRow>(
+      `
+        SELECT users.*
+        FROM petal_ledger
+        JOIN users ON users.id = petal_ledger.user_id
+        WHERE petal_ledger.user_id = $1
+          AND petal_ledger.ref_id = ANY($2::text[])
+        ORDER BY petal_ledger.created_at DESC
+        LIMIT 1
+      `,
+      [userId, safeRefs],
+    ));
+    return result ? this.repairWalletFloor(result.userId) : null;
+  }
+
   async purchaseCosmetic(userId: string, itemId: string, price: number, refId: string): Promise<StoredUser | null> {
     return withTransaction(async (client) => {
       const replayed = await this.findLedgerReplay(client, userId, refId);
@@ -613,22 +632,22 @@ export class UserService {
 
   async findByUsername(username: string): Promise<StoredUser | null> {
     const user = await this.withWalletFloor(await this.repository.findByUsername(username));
-    return user ?? this.importLegacyUser(await this.findLegacyByUsername(username), 'username');
+    return this.reconcileLegacyUser(user, await this.findLegacyByUsername(username), 'username');
   }
 
   async findById(userId: string): Promise<StoredUser | null> {
     const user = await this.withWalletFloor(await this.repository.findById(userId));
-    return user ?? this.importLegacyUser(await this.findLegacyById(userId), 'id');
+    return this.reconcileLegacyUser(user, await this.findLegacyById(userId), 'id');
   }
 
   async findByGoogleSub(sub: string): Promise<StoredUser | null> {
     const user = await this.withWalletFloor(await this.repository.findByGoogleSub(sub));
-    return user ?? this.importLegacyUser(await this.findLegacyByGoogleSub(sub), 'google');
+    return this.reconcileLegacyUser(user, await this.findLegacyByGoogleSub(sub), 'google');
   }
 
   async findByEmail(email: string): Promise<StoredUser | null> {
     const user = await this.withWalletFloor(await this.repository.findByEmail(email));
-    return user ?? this.importLegacyUser(await this.findLegacyByEmail(email), 'email');
+    return this.reconcileLegacyUser(user, await this.findLegacyByEmail(email), 'email');
   }
 
   async createPasswordUser(username: string, password: string, consent?: ConsentRecord): Promise<StoredUser> {
@@ -807,7 +826,7 @@ export class UserService {
       const progressRow = await client.query<ProgressRow>('SELECT * FROM user_progress WHERE user_id = $1 FOR UPDATE', [userId]);
       if (!progressRow.rows[0]) return null;
 
-      const currentUser = rowToUser(locked.rows[0]);
+      const currentUser = await this.repairLockedUserWalletFloor(client, rowToUser(locked.rows[0]));
       const currentProgress = rowToProgress(progressRow.rows[0], today);
       const lastClaimAt = currentProgress.lastPresenceClaimAt;
       if (lastClaimAt && dayKey(lastClaimAt) === today) {
@@ -897,7 +916,7 @@ export class UserService {
       const progressRow = await client.query<ProgressRow>('SELECT * FROM user_progress WHERE user_id = $1 FOR UPDATE', [userId]);
       if (!progressRow.rows[0]) return null;
 
-      const currentUser = rowToUser(locked.rows[0]);
+      const currentUser = await this.repairLockedUserWalletFloor(client, rowToUser(locked.rows[0]));
       const currentProgress = rowToProgress(progressRow.rows[0], today);
       const daily = { ...currentProgress.daily };
       if (activity === 'chat') daily.chatMessages += count;
@@ -992,6 +1011,26 @@ export class UserService {
       'INSERT INTO user_progress (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING',
       [userId],
     );
+  }
+
+  private async repairLockedUserWalletFloor(client: PoolClient, user: StoredUser): Promise<StoredUser> {
+    const result = await client.query<{ ledger_sum: string | number }>(
+      'SELECT COALESCE(SUM(delta), 0) AS ledger_sum FROM petal_ledger WHERE user_id = $1',
+      [user.userId],
+    );
+    const ledgerSum = Math.max(0, Math.trunc(Number(result.rows[0]?.ledger_sum ?? 0)));
+    if (ledgerSum <= user.petals) return user;
+
+    const updated = await client.query<UserRow>(
+      'UPDATE users SET petals = $2, updated_at = NOW() WHERE id = $1 AND petals < $2 RETURNING *',
+      [user.userId, ledgerSum],
+    );
+    logWarn('wallet.repaired_from_ledger', {
+      userId: user.userId,
+      previousPetals: user.petals,
+      ledgerSum,
+    });
+    return updated.rows[0] ? rowToUser(updated.rows[0]) : user;
   }
 
   private async withWalletFloor(user: StoredUser | null): Promise<StoredUser | null> {
@@ -1091,6 +1130,48 @@ export class UserService {
     }
   }
 
+  private async reconcileLegacyUser(
+    user: StoredUser | null,
+    raw: Partial<StoredUser> | null,
+    source: string,
+  ): Promise<StoredUser | null> {
+    if (!raw || !this.shouldImportLegacyRedis()) return user;
+    if (!user) return this.importLegacyUser(raw, source);
+
+    const legacy = normalizeUser(raw);
+    const userMatchesLegacy = user.userId === legacy.userId ||
+      (Boolean(user.googleSub) && user.googleSub === legacy.googleSub) ||
+      (Boolean(user.email) && user.email?.toLowerCase() === legacy.email?.toLowerCase()) ||
+      user.username.toLowerCase() === legacy.username.toLowerCase();
+    if (!userMatchesLegacy) return user;
+
+    const shouldMerge = legacy.petals > user.petals ||
+      legacy.unlockedItems.some((item) => !user.unlockedItems.includes(item)) ||
+      (!user.googleSub && Boolean(legacy.googleSub)) ||
+      (!user.email && Boolean(legacy.email)) ||
+      (!user.avatarConfig && Boolean(legacy.avatarConfig));
+    if (!shouldMerge) return user;
+
+    try {
+      const merged = await this.mergeLegacyUser(user, legacy);
+      logInfo('auth.legacy_redis_user_reconciled', {
+        source,
+        userId: merged.userId,
+        legacyUserId: legacy.userId,
+        petals: merged.petals,
+      });
+      return merged;
+    } catch (err) {
+      logWarn('auth.legacy_redis_user_reconcile_failed', {
+        source,
+        userId: user.userId,
+        legacyUserId: legacy.userId,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return user;
+    }
+  }
+
   private async findRepositoryConflict(user: StoredUser): Promise<StoredUser | null> {
     return (await this.repository.findById(user.userId))
       ?? (user.googleSub ? await this.repository.findByGoogleSub(user.googleSub) : null)
@@ -1105,13 +1186,7 @@ export class UserService {
       username,
       petals: 0,
     }));
-    if (legacy.petals <= 0) return created;
-    return (await this.repository.applyWalletDelta({
-      userId: created.userId,
-      delta: legacy.petals,
-      reason: 'legacy-import',
-      refId: `legacy-redis:${legacy.userId}`,
-    })) ?? created;
+    return this.applyLegacyPetalFloor(created, legacy);
   }
 
   private async mergeLegacyUser(existing: StoredUser, legacy: StoredUser): Promise<StoredUser> {
@@ -1130,14 +1205,27 @@ export class UserService {
       tosAcceptedAt: existing.tosAcceptedAt ?? legacy.tosAcceptedAt,
       updatedAt: Date.now(),
     }));
-    if (legacy.petals <= merged.petals) return this.withWalletFloor(merged) as Promise<StoredUser>;
+    return this.applyLegacyPetalFloor(merged, legacy);
+  }
+
+  private legacyImportRefIds(legacyUserId: string): string[] {
+    return [`redis-import:${legacyUserId}`, `legacy-redis:${legacyUserId}`];
+  }
+
+  private async applyLegacyPetalFloor(user: StoredUser, legacy: StoredUser): Promise<StoredUser> {
+    const repaired = (await this.withWalletFloor(user)) ?? user;
+    if (legacy.petals <= repaired.petals) return repaired;
+
+    const replayed = await this.repository.findWalletReplay(repaired.userId, this.legacyImportRefIds(legacy.userId));
+    if (replayed) return (await this.withWalletFloor(replayed)) ?? replayed;
+
     const funded = await this.repository.applyWalletDelta({
-      userId: merged.userId,
-      delta: legacy.petals - merged.petals,
+      userId: repaired.userId,
+      delta: legacy.petals - repaired.petals,
       reason: 'legacy-import',
-      refId: `legacy-redis:${legacy.userId}`,
+      refId: `redis-import:${legacy.userId}`,
     });
-    return (await this.withWalletFloor(funded ?? merged)) ?? merged;
+    return (await this.withWalletFloor(funded ?? repaired)) ?? repaired;
   }
 
   private async uniqueRepositoryUsername(input: string): Promise<string> {

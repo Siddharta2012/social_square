@@ -152,10 +152,7 @@ export class BarScene extends BaseRoomScene {
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   protected override isLocalMovementLocked(): boolean {
-    const store = useGameStore.getState();
-    if (!store.showPoolOverlay) return false;
-    if (this._poolState.phase !== 'waiting' && this._poolState.phase !== 'playing') return false;
-    return this._poolState.players.some((player) => player.userId === this._myUserId);
+    return useGameStore.getState().showPoolOverlay;
   }
 
   create(): void {
@@ -227,6 +224,7 @@ export class BarScene extends BaseRoomScene {
   }
 
   update(time: number, delta: number): void {
+    this._syncPoolInputLock();
     super.update(time, delta);
     this._movingRemoteAvatars.forEach((userId) => {
       const avatar = this._remoteAvatars.get(userId);
@@ -551,6 +549,12 @@ export class BarScene extends BaseRoomScene {
 
   private _showPoolMessage(message: string, tone: 'info' | 'error'): void {
     poolMethods.showPoolMessage.call(this, message, tone);
+  }
+
+  private _syncPoolInputLock(): void {
+    const locked = useGameStore.getState().showPoolOverlay;
+    if (this.input.enabled === !locked) return;
+    this.input.enabled = !locked;
   }
 
   private _syncPoolPositionForServer(): void {

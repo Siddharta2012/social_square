@@ -1,5 +1,5 @@
 import { POOL_PLAY_COST, type PoolState } from '@social-square/shared';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { eventBus } from '../eventBus';
 import { t } from '../i18n';
 import { TABLE_H, TABLE_W } from './poolCanvasRenderer';
@@ -82,8 +82,38 @@ export const PoolOverlayView: React.FC<PoolOverlayViewProps> = ({
   handlePointerUp,
   shootCurrentAim,
 }) => {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+    const stop = (event: Event) => {
+      event.stopPropagation();
+    };
+    const events = [
+      'pointerdown',
+      'pointermove',
+      'pointerup',
+      'pointercancel',
+      'mousedown',
+      'mousemove',
+      'mouseup',
+      'click',
+      'touchstart',
+      'touchmove',
+      'touchend',
+      'wheel',
+      'keydown',
+      'keyup',
+    ];
+    events.forEach((eventName) => root.addEventListener(eventName, stop));
+    return () => {
+      events.forEach((eventName) => root.removeEventListener(eventName, stop));
+    };
+  }, []);
+
   return (
-    <div style={{
+    <div ref={rootRef} style={{
       position: 'absolute',
       inset: 0,
       zIndex: 146,

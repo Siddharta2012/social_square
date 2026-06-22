@@ -3,7 +3,7 @@
 buildCommand = "pnpm install && pnpm --filter shared build && pnpm --filter client build && pnpm --filter server build"
 
 [deploy]
-startCommand = "node apps/server/dist/index.js"
+startCommand = "node scripts/migrate.mjs && node apps/server/dist/index.js"
 restartPolicyType = "on_failure"
 healthcheckPath = "/api/ready"
 healthcheckTimeout = 30

@@ -120,6 +120,12 @@ export class MemoryUserRepository implements UserRepository {
     return Promise.resolve(clone(next));
   }
 
+  findWalletReplay(userId: string, refIds: string[]): Promise<StoredUser | null> {
+    const replay = this.ledger.find((entry) => entry.userId === userId && refIds.includes(entry.refId));
+    if (!replay) return Promise.resolve(null);
+    return this.repairWalletFloor(userId);
+  }
+
   revokeSessions(userId: string): Promise<StoredUser | null> {
     const user = this.users.get(userId);
     if (!user) return Promise.resolve(null);

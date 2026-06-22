@@ -120,7 +120,13 @@ export abstract class BaseRoomScene extends Phaser.Scene {
       return;
     }
 
-    this._updateKeyboardMovement(deltaSeconds);
+    if (this.isLocalMovementLocked()) {
+      if (this.movementSystem.isMoving) this.movementSystem.stopMovement();
+      this._keyboardDriving = false;
+      this._keyboardStepCooldown = 0;
+    } else {
+      this._updateKeyboardMovement(deltaSeconds);
+    }
     this.movementSystem.update(deltaSeconds);
 
     const newX = this.movementSystem.posX;

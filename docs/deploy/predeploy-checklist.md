@@ -19,6 +19,7 @@
 
 - `NODE_ENV=production`.
 - `JWT_SECRET` set to a long random value.
+- `DATABASE_URL` configured; Railway runs `node scripts/migrate.mjs` before server start.
 - `REDIS_URL` configured, or `REDIS_MOCK=true` only for temporary test deployments.
 - `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` configured.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` configured.
