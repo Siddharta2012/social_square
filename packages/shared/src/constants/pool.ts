@@ -4,6 +4,7 @@ export const POOL_OBJECT_ID = 'pool:bar';
 export const POOL_POSITION: Position = { x: 9, y: 8 };
 export const POOL_PLAY_COST = 200;
 export const POOL_MAX_PLAYERS = 2;
+export const POOL_PLAY_DURATION_MS = 600_000;
 
 export type PoolMode = 'solo' | 'duo';
 export type PoolPhase = 'idle' | 'waiting' | 'playing' | 'finished';
@@ -21,6 +22,7 @@ export interface PoolBall {
   vx: number;
   vy: number;
   color: string;
+  spin?: number;
   pocketed?: boolean;
 }
 
@@ -29,6 +31,7 @@ export interface PoolShot {
   userId: string;
   angle: number;
   power: number;
+  spin?: number;
   createdAt: number;
 }
 
@@ -38,6 +41,8 @@ export interface PoolState {
   mode: PoolMode;
   players: PoolPlayer[];
   balls: PoolBall[];
+  startedAt?: number;
+  expiresAt?: number;
   turnUserId?: string;
   winnerUserId?: string;
   lastShot?: PoolShot;
@@ -94,6 +99,8 @@ export function normalizePoolState(value: unknown, now = Date.now()): PoolState 
     mode,
     players,
     balls,
+    startedAt: typeof raw.startedAt === 'number' && Number.isFinite(raw.startedAt) ? raw.startedAt : undefined,
+    expiresAt: typeof raw.expiresAt === 'number' && Number.isFinite(raw.expiresAt) ? raw.expiresAt : undefined,
     turnUserId: typeof raw.turnUserId === 'string' ? raw.turnUserId : players[0]?.userId,
     winnerUserId: typeof raw.winnerUserId === 'string' ? raw.winnerUserId : undefined,
     lastShot,
@@ -137,6 +144,7 @@ export function parsePoolBalls(input: unknown): PoolBall[] | null {
       y: clamp(y, 0.09, 0.91),
       vx: clamp(vx, -2, 2),
       vy: clamp(vy, -2, 2),
+      spin: 0,
       pocketed: rawPocketed === '1',
     });
   }
@@ -173,6 +181,7 @@ function normalizePoolBalls(value: unknown): PoolBall[] {
       y: clamp(numberOr(raw.y, base.y), 0.09, 0.91),
       vx: clamp(numberOr(raw.vx, 0), -2, 2),
       vy: clamp(numberOr(raw.vy, 0), -2, 2),
+      spin: clamp(numberOr(raw.spin, 0), -1, 1),
       pocketed: raw.pocketed === true,
     }];
   });
@@ -188,6 +197,7 @@ function normalizePoolShot(value: unknown): PoolShot | undefined {
     userId: raw.userId,
     angle: clamp(numberOr(raw.angle, 0), -Math.PI * 2, Math.PI * 2),
     power: clamp(numberOr(raw.power, 0), 0, 1),
+    spin: clamp(numberOr(raw.spin, 0), -1, 1),
     createdAt: numberOr(raw.createdAt, Date.now()),
   };
 }

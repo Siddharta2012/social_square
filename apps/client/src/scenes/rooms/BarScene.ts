@@ -292,7 +292,7 @@ export class BarScene extends BaseRoomScene {
     eventBus.on('pool-start-solo', () => this._requestPoolStart('pool-start-solo'), this);
     eventBus.on('pool-create-duo', () => this._requestPoolStart('pool-create-duo'), this);
     eventBus.on('pool-join-duo', () => this._requestPoolStart('pool-join-duo'), this);
-    eventBus.on('pool-shot', (shot: { angle: number; power: number }) => this._requestPoolShot(shot), this);
+    eventBus.on('pool-shot', (shot: { angle: number; power: number; spin?: number }) => this._requestPoolShot(shot), this);
     eventBus.on('pool-sync', (balls: PoolBall[]) => this._requestPoolSync(balls), this);
     eventBus.on('pool-leave', () => this._requestPoolLeave(), this);
     useGameStore.getState().clearChatMessages();
@@ -1198,10 +1198,11 @@ export class BarScene extends BaseRoomScene {
     this._network?.emitInteract(POOL_OBJECT_ID, action);
   }
 
-  private _requestPoolShot(shot: { angle: number; power: number }): void {
+  private _requestPoolShot(shot: { angle: number; power: number; spin?: number }): void {
     this._network?.emitInteract(POOL_OBJECT_ID, 'pool-shot', {
       angle: shot.angle,
       power: shot.power,
+      spin: shot.spin ?? 0,
     });
   }
 

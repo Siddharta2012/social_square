@@ -6,6 +6,7 @@ import {
   PETAL_ACTION_COST,
   POOL_PLAY_COST,
   normalizeChatText,
+  normalizePoolState,
   orderItemLabel,
   parseJukeboxExternalTrack,
 } from '@social-square/shared';
@@ -43,6 +44,7 @@ export const HUD: React.FC = () => {
   const worldLoading = useGameStore((s) => s.worldLoading);
   const localAvatarState = useGameStore((s) => s.localAvatarState);
   const jukeboxStatus = useGameStore((s) => s.jukeboxStatus);
+  const poolStatus = useGameStore((s) => s.poolStatus);
   const showPoolOverlay = useGameStore((s) => s.showPoolOverlay);
   const chatMessages = useGameStore((s) => s.chatMessages);
   const waiterStatus = useGameStore((s) => s.waiterStatus);
@@ -71,6 +73,15 @@ export const HUD: React.FC = () => {
 
   const inRoom = currentRoomId !== null;
   const travelOptions = fastTravelLocations();
+  const pool = normalizePoolState(poolStatus);
+  const poolActive = pool.phase === 'waiting' || pool.phase === 'playing';
+  const poolIsMine = pool.players.some((player) => player.userId === userId);
+  const poolSecondsLeft = pool.expiresAt && poolActive
+    ? Math.max(0, Math.ceil((pool.expiresAt - clockNow) / 1000))
+    : 0;
+  const poolTimeLeft = poolSecondsLeft > 0
+    ? `${Math.floor(poolSecondsLeft / 60)}:${String(poolSecondsLeft % 60).padStart(2, '0')}`
+    : '';
   const jukeboxActive = jukeboxStatus?.playing === true;
   const jukeboxSecondsLeft = jukeboxStatus?.expiresAt
     ? Math.max(0, Math.ceil((jukeboxStatus.expiresAt - clockNow) / 1000))
@@ -135,10 +146,10 @@ export const HUD: React.FC = () => {
   }, [setAvatarConfig, setPetals, setShowAuthForm, setUser, token]);
 
   useEffect(() => {
-    if (!jukeboxActive) return undefined;
+    if (!jukeboxActive && !poolActive) return undefined;
     const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [jukeboxActive]);
+  }, [jukeboxActive, poolActive]);
 
   useEffect(() => {
     const updateLayoutMode = () => {
@@ -445,6 +456,47 @@ export const HUD: React.FC = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {inRoom && (jukeboxActive || (poolActive && poolTimeLeft)) && (
+        <div style={{
+          position: 'absolute',
+          top: isCompactHud ? '58px' : '50px',
+          left: isCompactHud ? '8px' : '16px',
+          zIndex: 123,
+          display: 'flex',
+          gap: '6px',
+          flexWrap: 'wrap',
+          pointerEvents: 'none',
+          maxWidth: isCompactHud ? 'calc(100vw - 16px)' : '420px',
+        }}>
+          {jukeboxActive && jukeboxTimeLeft && (
+            <div style={{
+              color: '#fff4d0',
+              background: 'rgba(20,18,42,0.88)',
+              border: '1px solid rgba(255,244,208,0.26)',
+              borderRadius: '5px',
+              padding: '5px 8px',
+              fontSize: '11px',
+              boxShadow: '0 8px 20px rgba(0,0,0,0.24)',
+            }}>
+              Jukebox {jukeboxTimeLeft}
+            </div>
+          )}
+          {poolActive && poolTimeLeft && (
+            <div style={{
+              color: poolIsMine ? '#bfffe4' : '#d8dcff',
+              background: 'rgba(10,24,22,0.88)',
+              border: '1px solid rgba(120,255,190,0.26)',
+              borderRadius: '5px',
+              padding: '5px 8px',
+              fontSize: '11px',
+              boxShadow: '0 8px 20px rgba(0,0,0,0.24)',
+            }}>
+              Biliardo {poolTimeLeft}
+            </div>
+          )}
         </div>
       )}
 

@@ -9,6 +9,7 @@ import {
   PETAL_ACTION_COST,
   PETAL_BLOOM_OBJECT_ID,
   POOL_OBJECT_ID,
+  POOL_PLAY_DURATION_MS,
   POOL_PLAY_COST,
   POOL_POSITION,
   JUKEBOX_PLAY_COST,
@@ -158,6 +159,21 @@ function nextPoolTurn(state: PoolState, userId: string): string | undefined {
   if (state.mode === 'solo' || state.players.length < 2) return userId;
   const currentIndex = state.players.findIndex((player) => player.userId === userId);
   return state.players[(currentIndex + 1) % state.players.length]?.userId ?? state.players[0]?.userId;
+}
+
+function poolIsExpired(state: PoolState, now = Date.now()): boolean {
+  return (state.phase === 'waiting' || state.phase === 'playing') &&
+    typeof state.expiresAt === 'number' &&
+    state.expiresAt <= now;
+}
+
+function expiredPoolState(now = Date.now()): PoolState {
+  return {
+    ...normalizePoolState(null, now),
+    phase: 'finished',
+    message: 'Tempo biliardo scaduto',
+    updatedAt: now,
+  };
 }
 
 async function emitPoolState(io: IoServer, roomId: string, nextState: PoolState): Promise<void> {
@@ -1042,9 +1058,21 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
       }
 
       const now = Date.now();
-      const current = normalizePoolState(await state.getObjectState(roomId, objectId), now);
+      let current = normalizePoolState(await state.getObjectState(roomId, objectId), now);
+      if (poolIsExpired(current, now)) {
+        const expired = expiredPoolState(now);
+        await emitPoolState(io, roomId, expired);
+        current = expired;
+        if (action !== 'pool-start-solo' && action !== 'pool-create-duo') {
+          socket.emit('error', { code: 'POOL_EXPIRED', message: 'Tempo biliardo scaduto' });
+          return;
+        }
+      }
 
       if (action === 'pool-start-solo' || action === 'pool-create-duo' || action === 'pool-join-duo') {
+        if (current.phase === 'finished' && action !== 'pool-join-duo') {
+          current = normalizePoolState(null, now);
+        }
         if (poolPlayer(current, userId)) {
           socket.emit('error', { code: 'POOL_ALREADY_JOINED', message: 'Sei gia al tavolo' });
           return;
@@ -1067,12 +1095,15 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         logInfo('economy.spend', { userId, source: 'pool', amount: POOL_PLAY_COST, petals: paidUser.petals });
 
         const joining = { userId, username, joinedAt: now };
+        const sessionExpiresAt = now + POOL_PLAY_DURATION_MS;
         const next: PoolState = action === 'pool-start-solo'
           ? {
               ...normalizePoolState(null, now),
               phase: 'playing',
               mode: 'solo',
               players: [joining],
+              startedAt: now,
+              expiresAt: sessionExpiresAt,
               turnUserId: userId,
               message: `${username} gioca da solo`,
               updatedAt: now,
@@ -1083,6 +1114,8 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
                 phase: 'waiting',
                 mode: 'duo',
                 players: [joining],
+                startedAt: now,
+                expiresAt: sessionExpiresAt,
                 turnUserId: userId,
                 message: `${username} aspetta un avversario`,
                 updatedAt: now,
@@ -1092,6 +1125,8 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
                 phase: 'playing',
                 mode: 'duo',
                 players: [...current.players, joining],
+                startedAt: now,
+                expiresAt: sessionExpiresAt,
                 turnUserId: current.players[0]?.userId ?? userId,
                 message: `${username} entra al tavolo`,
                 updatedAt: now,
@@ -1113,6 +1148,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
 
         const angle = typeof payload.angle === 'number' && Number.isFinite(payload.angle) ? payload.angle : NaN;
         const power = typeof payload.power === 'number' && Number.isFinite(payload.power) ? payload.power : NaN;
+        const spin = typeof payload.spin === 'number' && Number.isFinite(payload.spin) ? payload.spin : 0;
         if (!Number.isFinite(angle) || !Number.isFinite(power)) {
           socket.emit('error', { code: 'INVALID_POOL_SHOT', message: 'Tiro non valido' });
           return;
@@ -1126,6 +1162,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
             userId,
             angle: Math.max(-Math.PI * 2, Math.min(Math.PI * 2, angle)),
             power: Math.max(0, Math.min(1, power)),
+            spin: Math.max(-1, Math.min(1, spin)),
             createdAt: now,
           },
           message: `${username} tira`,
@@ -1139,9 +1176,13 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         if (current.phase !== 'playing' || !poolPlayer(current, userId)) return;
         const balls = parsePoolBalls(payload.balls);
         if (!balls) return;
+        const remainingBalls = balls.filter((ball) => ball.id !== 'cue' && !ball.pocketed);
         await emitPoolState(io, roomId, {
           ...current,
+          phase: remainingBalls.length === 0 ? 'finished' : current.phase,
           balls,
+          winnerUserId: remainingBalls.length === 0 ? current.lastShot?.userId ?? userId : current.winnerUserId,
+          message: remainingBalls.length === 0 ? 'Partita conclusa' : current.message,
           updatedAt: now,
         });
         return;

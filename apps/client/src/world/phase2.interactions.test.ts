@@ -5,6 +5,7 @@ import {
   JUKEBOX_PLAY_DURATION_MS,
   JUKEBOX_TRACKS,
   POOL_OBJECT_ID,
+  POOL_PLAY_DURATION_MS,
   POOL_PLAY_COST,
   POOL_POSITION,
   normalizePoolState,
@@ -50,18 +51,35 @@ describe('phase 2 interaction data', () => {
     expect(JUKEBOX_PLAY_COST).toBe(200);
     expect(POOL_PLAY_COST).toBe(200);
     expect(JUKEBOX_PLAY_DURATION_MS).toBe(180_000);
+    expect(POOL_PLAY_DURATION_MS).toBe(600_000);
     expect(INTERACTION_RADIUS_TILES).toBeGreaterThan(2);
     expect(isWithinInteractionRange({ x: 16, y: 3 }, { x: 17, y: 4 })).toBe(true);
     expect(isWithinInteractionRange({ x: 16, y: 3 }, { x: 22, y: 8 })).toBe(false);
   });
 
   it('defines billiards as a paid bar interaction', () => {
-    const state = normalizePoolState({ phase: 'waiting', mode: 'duo', players: [{ userId: 'a', username: 'A' }] }, 1000);
+    const state = normalizePoolState({
+      phase: 'waiting',
+      mode: 'duo',
+      players: [{ userId: 'a', username: 'A' }],
+      startedAt: 1000,
+      expiresAt: 1000 + POOL_PLAY_DURATION_MS,
+      lastShot: {
+        shotId: 'shot-1',
+        userId: 'a',
+        angle: 0,
+        power: 0.5,
+        spin: 2,
+        createdAt: 1000,
+      },
+    }, 1000);
 
     expect(POOL_OBJECT_ID).toBe('pool:bar');
     expect(POOL_POSITION).toEqual({ x: 9, y: 8 });
     expect(state.phase).toBe('waiting');
     expect(state.players[0].userId).toBe('a');
+    expect(state.expiresAt).toBe(601_000);
+    expect(state.lastShot?.spin).toBe(1);
   });
 
   it('keeps configured petal spawn points on walkable tiles', () => {
