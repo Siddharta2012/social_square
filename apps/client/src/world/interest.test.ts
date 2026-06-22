@@ -5,6 +5,7 @@ import {
   filterObjectsByInterest,
   filterUsersByInterest,
   isObjectVisibleToViewer,
+  objectInterestScope,
   isPositionInInterestRange,
   objectInterestPosition,
   positionToSector,
@@ -64,7 +65,7 @@ describe('interest management helpers', () => {
     expect(isObjectVisibleToViewer(gardenViewer, jukebox)).toBe(false);
   });
 
-  it('keeps room-wide waiter state visible even outside range', () => {
+  it('scopes waiter state to the location unless it is personal', () => {
     const viewer = { userId: 'bystander', position: { x: 9, y: 14 } };
     const waiter = {
       objectId: WAITER_OBJECT_ID,
@@ -78,6 +79,8 @@ describe('interest management helpers', () => {
       },
     };
 
-    expect(isObjectVisibleToViewer(viewer, waiter)).toBe(true);
+    expect(objectInterestScope(waiter)).toBe('personal');
+    expect(isObjectVisibleToViewer(viewer, waiter)).toBe(false);
+    expect(isObjectVisibleToViewer({ userId: 'customer', position: { x: 9, y: 14 } }, waiter)).toBe(true);
   });
 });

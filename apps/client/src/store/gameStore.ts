@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { CHAT_HISTORY_LIMIT } from '@social-square/shared';
-import type { AvatarState, ChatMessage, HeldItem, JukeboxTrackId, WaiterState } from '@social-square/shared';
+import type { AvatarState, ChatMessage, HeldItem, JukeboxHistoryEntry, JukeboxTrackId, WaiterState } from '@social-square/shared';
 
 export type WorldLoadingState = 'initial' | 'streaming' | null;
 
@@ -12,6 +12,16 @@ export interface JukeboxStatus {
   source: 'local' | 'youtube';
   expiresAt: number | null;
   externalUrl?: string;
+  requestedBy?: string;
+  history?: JukeboxHistoryEntry[];
+}
+
+export interface SpeakingUser {
+  userId: string;
+  username: string;
+  distance: number;
+  volume: number;
+  pan: number;
 }
 
 export interface ActionAvailability {
@@ -58,6 +68,7 @@ interface GameState {
   showAuthForm: boolean;
   voiceAvailable: boolean;
   voiceMuted: boolean;
+  speakingUsers: SpeakingUser[];
   setConnected: (connected: boolean) => void;
   setCurrentRoom: (roomId: string | null) => void;
   setRoomName: (name: string | null) => void;
@@ -70,6 +81,7 @@ interface GameState {
   setShowAuthForm: (show: boolean) => void;
   setVoiceAvailable: (v: boolean) => void;
   setVoiceMuted: (v: boolean) => void;
+  setSpeakingUsers: (users: SpeakingUser[]) => void;
   showAudioSettings: boolean;
   setShowAudioSettings: (v: boolean) => void;
   heldItem: HeldItem;
@@ -111,6 +123,7 @@ export const useGameStore = create<GameState>((set) => ({
   showAuthForm: false,
   voiceAvailable: false,
   voiceMuted: false,
+  speakingUsers: [],
   setConnected: (connected) => set({ isConnected: connected }),
   setCurrentRoom: (roomId) => set({ currentRoomId: roomId }),
   setRoomName: (name) => set({ roomName: name }),
@@ -123,6 +136,7 @@ export const useGameStore = create<GameState>((set) => ({
   setShowAuthForm: (show) => set({ showAuthForm: show }),
   setVoiceAvailable: (v) => set({ voiceAvailable: v }),
   setVoiceMuted: (v) => set({ voiceMuted: v }),
+  setSpeakingUsers: (users) => set({ speakingUsers: users }),
   showAudioSettings: false,
   setShowAudioSettings: (v) => set({ showAudioSettings: v }),
   heldItem: null,

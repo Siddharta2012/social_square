@@ -11,6 +11,9 @@ importers:
       concurrently:
         specifier: ^8.2.2
         version: 8.2.2
+      socket.io-client:
+        specifier: ^4.8.3
+        version: 4.8.3
       typescript:
         specifier: ^5.4.5
         version: 5.9.3
@@ -121,6 +124,9 @@ importers:
       typescript:
         specifier: ^5.4.5
         version: 5.9.3
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@20.19.43)
 
   packages/shared:
     devDependencies:

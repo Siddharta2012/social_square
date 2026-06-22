@@ -6,10 +6,12 @@
     "dev": "concurrently \"pnpm --filter client dev\" \"pnpm --filter server dev\"",
     "build": "pnpm --filter shared build && pnpm --filter client build && pnpm --filter server build",
     "test": "pnpm -r test",
+    "smoke:dev": "node scripts/smoke-dev.mjs",
     "lint": "pnpm -r lint"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
+    "socket.io-client": "^4.8.3",
     "typescript": "^5.4.5"
   }
 }

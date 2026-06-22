@@ -42,7 +42,7 @@ export interface NetworkCallbacks {
   onObjectStateChanged?: (data: { objectId: string; state: ObjectState }) => void;
   onUserEmote?: (data: { userId: string; emoteId: EmoteId }) => void;
   onUserChatMessage?: (data: ChatMessage) => void;
-  onAccountUpdated?: (data: { petals?: number; avatarConfig?: AvatarConfig }) => void;
+  onAccountUpdated?: (data: { petals?: number; avatarConfig?: AvatarConfig; stats?: Record<string, number> }) => void;
   onError?: (data: { code: string; message: string }) => void;
 }
 

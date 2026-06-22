@@ -12,6 +12,18 @@ export interface VoiceCallbacks {
   onError?: (err: Error) => void;
 }
 
+export interface ParticipantSpatialState {
+  volume: number;
+  pan: number;
+}
+
+interface ElementAudioGraph {
+  context: AudioContext;
+  source: MediaElementAudioSourceNode;
+  gain: GainNode;
+  panner: StereoPannerNode | null;
+}
+
 export class VoiceSystem {
   private _room: Room | null = null;
   private _callbacks: VoiceCallbacks = {};
@@ -19,8 +31,10 @@ export class VoiceSystem {
   private _ready = false;
   private _roomId: string | null = null;
   private _remoteAudio = new Map<string, Set<HTMLMediaElement>>();
-  private _participantVolumes = new Map<string, number>();
+  private _participantSpatial = new Map<string, ParticipantSpatialState>();
   private _participantMuted = new Set<string>();
+  private _elementGraphs = new Map<HTMLMediaElement, ElementAudioGraph>();
+  private _audioContext: AudioContext | null = null;
 
   setCallbacks(cb: VoiceCallbacks): void {
     this._callbacks = cb;
@@ -86,7 +100,20 @@ export class VoiceSystem {
   }
 
   setParticipantVolume(userId: string, volume: number): void {
-    this._participantVolumes.set(userId, Math.max(0, Math.min(1, volume)));
+    const current = this._participantSpatial.get(userId) ?? { volume: 1, pan: 0 };
+    this._participantSpatial.set(userId, {
+      ...current,
+      volume: clamp(volume, 0, 1),
+    });
+    this._applyParticipantAudio(userId);
+  }
+
+  setParticipantSpatial(userId: string, spatial: Partial<ParticipantSpatialState>): void {
+    const current = this._participantSpatial.get(userId) ?? { volume: 1, pan: 0 };
+    this._participantSpatial.set(userId, {
+      volume: clamp(spatial.volume ?? current.volume, 0, 1),
+      pan: clamp(spatial.pan ?? current.pan, -1, 1),
+    });
     this._applyParticipantAudio(userId);
   }
 
@@ -100,7 +127,7 @@ export class VoiceSystem {
       await this._room.disconnect();
       this._room = null;
     }
-    this._remoteAudio.forEach((elements) => elements.forEach((el) => el.remove()));
+    this._remoteAudio.forEach((elements) => elements.forEach((el) => this._removeAudioElement(el)));
     this._remoteAudio.clear();
     this._ready = false;
     this._roomId = null;
@@ -110,11 +137,62 @@ export class VoiceSystem {
     const elements = this._remoteAudio.get(userId);
     if (!elements) return;
     const muted = this._participantMuted.has(userId);
-    const volume = this._participantVolumes.get(userId) ?? 1;
+    const spatial = this._participantSpatial.get(userId) ?? { volume: 1, pan: 0 };
     elements.forEach((el) => {
+      const graph = this._ensureAudioGraph(el);
+      const volume = muted ? 0 : spatial.volume;
       el.muted = muted || volume <= 0;
-      el.volume = muted ? 0 : volume;
+      if (graph) {
+        el.volume = 1;
+        graph.gain.gain.setTargetAtTime(volume, graph.context.currentTime, 0.045);
+        graph.panner?.pan.setTargetAtTime(spatial.pan, graph.context.currentTime, 0.06);
+        void graph.context.resume().catch(() => undefined);
+      } else {
+        el.volume = volume;
+      }
     });
+  }
+
+  private _ensureAudioGraph(el: HTMLMediaElement): ElementAudioGraph | null {
+    const existing = this._elementGraphs.get(el);
+    if (existing) return existing;
+
+    try {
+      const context = this._audioContext ?? createAudioContext();
+      if (!context) return null;
+      this._audioContext = context;
+
+      const source = context.createMediaElementSource(el);
+      const gain = context.createGain();
+      const panner = typeof context.createStereoPanner === 'function'
+        ? context.createStereoPanner()
+        : null;
+
+      if (panner) {
+        source.connect(panner);
+        panner.connect(gain);
+      } else {
+        source.connect(gain);
+      }
+      gain.connect(context.destination);
+
+      const graph = { context, source, gain, panner };
+      this._elementGraphs.set(el, graph);
+      return graph;
+    } catch {
+      return null;
+    }
+  }
+
+  private _removeAudioElement(el: HTMLMediaElement): void {
+    const graph = this._elementGraphs.get(el);
+    if (graph) {
+      graph.source.disconnect();
+      graph.panner?.disconnect();
+      graph.gain.disconnect();
+      this._elementGraphs.delete(el);
+    }
+    el.remove();
   }
 
   private _setupRoomListeners(): void {
@@ -151,7 +229,7 @@ export class VoiceSystem {
       const userId = participant.identity;
       track.detach().forEach((el) => {
         this._remoteAudio.get(userId)?.delete(el);
-        el.remove();
+        this._removeAudioElement(el);
       });
       if (this._remoteAudio.get(userId)?.size === 0) this._remoteAudio.delete(userId);
     });
@@ -163,4 +241,14 @@ export class VoiceSystem {
       }
     });
   }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function createAudioContext(): AudioContext | null {
+  const win = window as Window & { webkitAudioContext?: typeof AudioContext };
+  const AudioContextCtor = window.AudioContext ?? win.webkitAudioContext;
+  return AudioContextCtor ? new AudioContextCtor() : null;
 }

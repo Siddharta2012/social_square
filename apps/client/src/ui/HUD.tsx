@@ -35,6 +35,7 @@ export const HUD: React.FC = () => {
   const petals = useGameStore((s) => s.petals);
   const voiceAvailable = useGameStore((s) => s.voiceAvailable);
   const voiceMuted = useGameStore((s) => s.voiceMuted);
+  const speakingUsers = useGameStore((s) => s.speakingUsers);
   const setVoiceMuted = useGameStore((s) => s.setVoiceMuted);
   const heldItem = useGameStore((s) => s.heldItem);
   const worldLoading = useGameStore((s) => s.worldLoading);
@@ -74,6 +75,9 @@ export const HUD: React.FC = () => {
   const jukeboxTimeLeft = jukeboxSecondsLeft > 0
     ? `${Math.floor(jukeboxSecondsLeft / 60)}:${String(jukeboxSecondsLeft % 60).padStart(2, '0')}`
     : '';
+  const jukeboxLabel = jukeboxStatus?.playing
+    ? `${jukeboxStatus.title}${jukeboxStatus.requestedBy ? ` di ${jukeboxStatus.requestedBy}` : ''}${jukeboxTimeLeft ? ` ${jukeboxTimeLeft}` : ''}`
+    : `Jukebox ${JUKEBOX_PLAY_COST} petali`;
   const debugRows = worldDebugMetrics
     ? [
       ['fps', worldDebugMetrics.fps || '-'],
@@ -230,17 +234,20 @@ export const HUD: React.FC = () => {
 
   const waiterIsMine = waiterStatus?.customerId === userId;
   const waiterCanCall = !waiterStatus || waiterStatus.phase === 'idle' || waiterStatus.phase === 'delivered';
+  const waiterQueueSize = waiterStatus?.queue?.length ?? 0;
   const waiterAwaitingOrder = waiterStatus?.phase === 'awaiting-order' && waiterIsMine;
+  const waiterAlreadyWaiting = waiterIsMine && !waiterCanCall && !waiterAwaitingOrder;
+  const waiterCanQueue = Boolean(waiterStatus && !waiterCanCall && !waiterIsMine);
   const canUseJukebox = actionAvailability.nearJukebox;
   const canUseWaiter = actionAvailability.nearWaiter;
   const canAffordAction = petals >= PETAL_ACTION_COST;
-  const waiterButtonEnabled = canUseWaiter && (waiterCanCall || waiterIsMine);
+  const waiterButtonEnabled = canUseWaiter && !waiterAwaitingOrder && !waiterAlreadyWaiting && (waiterCanCall || waiterCanQueue);
   const waiterLabel = waiterCanCall
     ? 'Cameriere'
     : waiterStatus?.phase === 'approaching'
-      ? 'Arrivo...'
+      ? waiterQueueSize > 0 ? `Arrivo +${waiterQueueSize}` : 'Arrivo...'
       : waiterStatus?.phase === 'awaiting-order'
-        ? waiterIsMine ? 'Scegli' : 'Occupato'
+        ? waiterIsMine ? 'Scegli' : waiterCanQueue ? 'Mettiti in coda' : 'Occupato'
         : waiterStatus?.phase === 'to-counter'
           ? 'Al bancone'
           : waiterStatus?.phase === 'delivering'
@@ -398,6 +405,45 @@ export const HUD: React.FC = () => {
       </div>
 
       {/* Bottom bar — solo in stanza */}
+      {inRoom && speakingUsers.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: isCompactHud ? '58px' : '50px',
+          right: isCompactHud ? '8px' : '16px',
+          zIndex: 124,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '5px',
+          pointerEvents: 'none',
+          maxWidth: isCompactHud ? 'calc(100vw - 16px)' : '260px',
+        }}>
+          {speakingUsers.map((speaker) => {
+            const side = speaker.pan < -0.22 ? 'L' : speaker.pan > 0.22 ? 'R' : 'C';
+            return (
+              <div key={speaker.userId} style={{
+                display: 'grid',
+                gridTemplateColumns: '18px minmax(0, 1fr) auto',
+                alignItems: 'center',
+                gap: '7px',
+                background: 'rgba(10,10,30,0.82)',
+                border: '1px solid rgba(136,255,187,0.32)',
+                borderRadius: '5px',
+                padding: '5px 7px',
+                color: '#dfffee',
+                fontSize: '10px',
+                boxShadow: '0 6px 16px rgba(0,0,0,0.22)',
+              }}>
+                <span style={{ color: '#88ffbb', fontWeight: 700 }}>{side}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {speaker.username}
+                </span>
+                <span style={{ color: '#88aabb' }}>{speaker.distance.toFixed(1)}m</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {inRoom && !isCompactHud && (
         <div style={{
           position: 'absolute', bottom: 0, left: 0, right: 0,
@@ -422,9 +468,7 @@ export const HUD: React.FC = () => {
               minWidth: 0, maxWidth: '260px',
             }}>
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {jukeboxStatus?.playing
-                  ? `${jukeboxStatus.title}${jukeboxTimeLeft ? ` ${jukeboxTimeLeft}` : ''}`
-                  : `Jukebox ${JUKEBOX_PLAY_COST} petali`}
+                {jukeboxLabel}
               </span>
               <button
                 style={{ ...smallButtonStyle, ...(!canUseJukebox || jukeboxActive ? disabledButtonStyle : {}) }}
@@ -474,9 +518,9 @@ export const HUD: React.FC = () => {
                   cursor: waiterButtonEnabled ? 'pointer' : 'default',
                 }}
                 disabled={!waiterButtonEnabled}
-                title={canUseWaiter ? 'Chiama il cameriere' : 'Avvicinati al cameriere'}
+                title={canUseWaiter ? waiterCanQueue ? 'Mettiti in coda' : 'Chiama il cameriere' : 'Avvicinati al cameriere'}
                 onClick={() => {
-                  if (waiterCanCall && canUseWaiter) eventBus.emit('waiter-call');
+                  if (waiterButtonEnabled) eventBus.emit('waiter-call');
                 }}
               >
                 {waiterLabel}
@@ -688,7 +732,7 @@ export const HUD: React.FC = () => {
                   }}
                   disabled={!waiterButtonEnabled}
                   onClick={() => {
-                    if (waiterCanCall && canUseWaiter) eventBus.emit('waiter-call');
+                    if (waiterButtonEnabled) eventBus.emit('waiter-call');
                   }}
                 >
                   {waiterLabel}
@@ -709,7 +753,7 @@ export const HUD: React.FC = () => {
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                 }}>
-                  {jukeboxStatus.title}{jukeboxTimeLeft ? ` ${jukeboxTimeLeft}` : ''}
+                  {jukeboxLabel}
                 </div>
               )}
 

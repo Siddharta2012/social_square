@@ -17,6 +17,14 @@ export type WaiterPhase =
   | 'delivered'
   | 'returning';
 
+export interface WaiterQueueEntry {
+  userId: string;
+  username: string;
+  x: number;
+  y: number;
+  requestedAt: number;
+}
+
 export interface WaiterState {
   kind: 'waiter';
   phase: WaiterPhase;
@@ -28,6 +36,8 @@ export interface WaiterState {
   customerName?: string;
   orderId?: string;
   item?: OrderItemId;
+  queue?: WaiterQueueEntry[];
+  cooldownUntil?: number;
   updatedAt: number;
 }
 
@@ -55,6 +65,27 @@ function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function normalizeQueue(value: unknown): WaiterQueueEntry[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries = value.flatMap((entry): WaiterQueueEntry[] => {
+    if (!entry || typeof entry !== 'object') return [];
+    const raw = entry as Partial<WaiterQueueEntry>;
+    const x = numberOrUndefined(raw.x);
+    const y = numberOrUndefined(raw.y);
+    if (typeof raw.userId !== 'string' || typeof raw.username !== 'string' || x === undefined || y === undefined) {
+      return [];
+    }
+    return [{
+      userId: raw.userId,
+      username: raw.username.slice(0, 30),
+      x,
+      y,
+      requestedAt: numberOrUndefined(raw.requestedAt) ?? Date.now(),
+    }];
+  });
+  return entries.length > 0 ? entries.slice(0, 6) : undefined;
+}
+
 export function normalizeWaiterState(value: unknown, now = Date.now()): WaiterState {
   const raw = value && typeof value === 'object' ? value as Partial<WaiterState> : {};
   const fallback = defaultWaiterState(now);
@@ -78,6 +109,8 @@ export function normalizeWaiterState(value: unknown, now = Date.now()): WaiterSt
     customerName: typeof raw.customerName === 'string' ? raw.customerName : undefined,
     orderId: typeof raw.orderId === 'string' ? raw.orderId : undefined,
     item: isOrderItemId(raw.item) ? raw.item : undefined,
+    queue: normalizeQueue(raw.queue),
+    cooldownUntil: numberOrUndefined(raw.cooldownUntil),
     updatedAt: numberOrUndefined(raw.updatedAt) ?? now,
   };
 }

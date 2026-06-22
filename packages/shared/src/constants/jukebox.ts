@@ -15,6 +15,14 @@ export interface JukeboxExternalTrack {
   url: string;
 }
 
+export interface JukeboxHistoryEntry {
+  trackId: JukeboxTrackId;
+  title: string;
+  source: 'local' | JukeboxExternalProvider;
+  requestedBy?: string;
+  startedAt: number;
+}
+
 export interface JukeboxState {
   trackId: JukeboxTrackId;
   externalTrack?: JukeboxExternalTrack;
@@ -25,6 +33,7 @@ export interface JukeboxState {
   expiresAt: number | null;
   updatedAt: number;
   requestedBy?: string;
+  history?: JukeboxHistoryEntry[];
 }
 
 export const DEFAULT_JUKEBOX_TRACK_ID: JukeboxTrackId = JUKEBOX_TRACKS[0].id;
@@ -121,6 +130,26 @@ export function normalizeJukeboxExternalTrack(value: unknown): JukeboxExternalTr
   return parsed ?? undefined;
 }
 
+function normalizeJukeboxHistory(value: unknown): JukeboxHistoryEntry[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries = value.flatMap((entry): JukeboxHistoryEntry[] => {
+    if (!entry || typeof entry !== 'object') return [];
+    const raw = entry as Partial<JukeboxHistoryEntry>;
+    if (!isJukeboxTrackId(raw.trackId) || typeof raw.title !== 'string' || typeof raw.startedAt !== 'number') {
+      return [];
+    }
+    const source = raw.source === 'youtube' ? raw.source : 'local';
+    return [{
+      trackId: raw.trackId,
+      title: raw.title.slice(0, 80),
+      source,
+      requestedBy: typeof raw.requestedBy === 'string' ? raw.requestedBy.slice(0, 30) : undefined,
+      startedAt: raw.startedAt,
+    }];
+  });
+  return entries.length > 0 ? entries.slice(0, 8) : undefined;
+}
+
 function queryParam(urlRest: string, key: string): string | null {
   const query = urlRest.split('?')[1]?.split('#')[0];
   if (!query) return null;
@@ -150,5 +179,6 @@ export function normalizeJukeboxState(value: unknown, now = Date.now()): Jukebox
     expiresAt,
     updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : now,
     requestedBy: typeof raw.requestedBy === 'string' ? raw.requestedBy : undefined,
+    history: normalizeJukeboxHistory(raw.history),
   };
 }

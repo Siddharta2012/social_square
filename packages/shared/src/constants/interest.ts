@@ -18,6 +18,8 @@ export interface ObjectStateSnapshot {
   state: ObjectState;
 }
 
+export type ObjectInterestScope = 'room' | 'location' | 'personal';
+
 export function positionToSector(
   position: Position,
   sectorSize = WORLD_SECTOR_SIZE,
@@ -77,8 +79,10 @@ function objectHasPersonalInterest(
   return normalizeWaiterState(object.state).customerId === viewer.userId;
 }
 
-function isRoomWideObject(objectId: string): boolean {
-  return objectId === WAITER_OBJECT_ID;
+export function objectInterestScope(object: ObjectStateSnapshot): ObjectInterestScope {
+  if (object.state.occupiedBy) return 'personal';
+  if (object.objectId === WAITER_OBJECT_ID && normalizeWaiterState(object.state).customerId) return 'personal';
+  return 'location';
 }
 
 export function objectInterestPosition(object: ObjectStateSnapshot): Position | null {
@@ -97,7 +101,6 @@ export function isObjectVisibleToViewer(
   radius = INTEREST_RADIUS_SECTORS,
   sectorSize = WORLD_SECTOR_SIZE,
 ): boolean {
-  if (isRoomWideObject(object.objectId)) return true;
   if (objectHasPersonalInterest(viewer, object)) return true;
 
   const position = objectInterestPosition(object);

@@ -101,6 +101,12 @@ export class JukeboxPlayer {
   private _youtubeFrame: HTMLIFrameElement | null = null;
   private _youtubeVideoId: string | null = null;
   private _trackId: JukeboxTrackId | null = null;
+  private _volume = 0.32;
+  private _pan = 0;
+  private _audioContext: AudioContext | null = null;
+  private _audioSource: MediaElementAudioSourceNode | null = null;
+  private _audioGain: GainNode | null = null;
+  private _audioPanner: StereoPannerNode | null = null;
 
   async applyState(state: JukeboxState): Promise<PlaybackResult> {
     const next = normalizeJukeboxState(state);
@@ -148,22 +154,79 @@ export class JukeboxPlayer {
   destroy(): void {
     this._audio?.pause();
     this._audio = null;
+    this._disconnectAudioGraph();
     this._hideExternalPlayer();
     for (const url of this._urls.values()) URL.revokeObjectURL(url);
     this._urls.clear();
     this._trackId = null;
   }
 
+  setSpatial(volume: number, pan = 0): void {
+    this._volume = clamp(volume, 0, 1) * 0.36;
+    this._pan = clamp(pan, -1, 1);
+    this._applyLocalSpatial();
+  }
+
   private _ensureAudio(trackId: JukeboxTrackId): HTMLAudioElement {
     if (this._audio && this._trackId === trackId) return this._audio;
 
     this._audio?.pause();
+    this._disconnectAudioGraph();
     const audio = new Audio(this._urlFor(trackId));
     audio.loop = true;
-    audio.volume = 0.32;
     this._audio = audio;
     this._trackId = trackId;
+    this._ensureAudioGraph(audio);
+    this._applyLocalSpatial();
     return audio;
+  }
+
+  private _ensureAudioGraph(audio: HTMLAudioElement): void {
+    try {
+      const context = this._audioContext ?? createAudioContext();
+      if (!context) return;
+      this._audioContext = context;
+      const source = context.createMediaElementSource(audio);
+      const gain = context.createGain();
+      const panner = typeof context.createStereoPanner === 'function'
+        ? context.createStereoPanner()
+        : null;
+
+      if (panner) {
+        source.connect(panner);
+        panner.connect(gain);
+      } else {
+        source.connect(gain);
+      }
+      gain.connect(context.destination);
+
+      this._audioSource = source;
+      this._audioGain = gain;
+      this._audioPanner = panner;
+    } catch {
+      this._disconnectAudioGraph();
+    }
+  }
+
+  private _applyLocalSpatial(): void {
+    if (!this._audio) return;
+    if (this._audioGain && this._audioContext) {
+      this._audio.volume = 1;
+      this._audioGain.gain.setTargetAtTime(this._volume, this._audioContext.currentTime, 0.06);
+      this._audioPanner?.pan.setTargetAtTime(this._pan, this._audioContext.currentTime, 0.08);
+      void this._audioContext.resume().catch(() => undefined);
+    } else {
+      this._audio.volume = this._volume;
+    }
+  }
+
+  private _disconnectAudioGraph(): void {
+    this._audioSource?.disconnect();
+    this._audioPanner?.disconnect();
+    this._audioGain?.disconnect();
+    this._audioSource = null;
+    this._audioPanner = null;
+    this._audioGain = null;
   }
 
   private _urlFor(trackId: JukeboxTrackId): string {
@@ -227,4 +290,14 @@ export class JukeboxPlayer {
     this._youtubeShell?.remove();
     this._youtubeShell = null;
   }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function createAudioContext(): AudioContext | null {
+  const win = window as Window & { webkitAudioContext?: typeof AudioContext };
+  const AudioContextCtor = window.AudioContext ?? win.webkitAudioContext;
+  return AudioContextCtor ? new AudioContextCtor() : null;
 }

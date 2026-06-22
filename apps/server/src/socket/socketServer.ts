@@ -8,6 +8,7 @@ import type {
 } from '@social-square/shared';
 import { socketAuthMiddleware } from './middleware/socketAuth';
 import { registerRoomHandlers } from './handlers/roomHandlers';
+import { logInfo } from '../utils/logger';
 
 export function createSocketServer(httpServer: HttpServer) {
   const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(
@@ -24,7 +25,7 @@ export function createSocketServer(httpServer: HttpServer) {
   io.use(socketAuthMiddleware);
 
   io.on('connection', (socket) => {
-    console.log(`[Socket] Connected: ${socket.data.username} (${socket.id})`);
+    logInfo('socket.connected', { userId: socket.data.userId, username: socket.data.username, socketId: socket.id });
     registerRoomHandlers(io, socket);
   });
 

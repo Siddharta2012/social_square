@@ -24,6 +24,7 @@ import {
   isPositionInInterestRange,
   isSeatObjectId,
   isWithinInteractionRange,
+  jukeboxTitle,
   nextJukeboxTrackId,
   normalizeChatText,
   normalizeJukeboxState,
@@ -45,9 +46,13 @@ import type {
   AvatarConfig,
   Position,
   WaiterState,
+  WaiterQueueEntry,
+  JukeboxState,
 } from '@social-square/shared';
 import { StateService } from '../../services/StateService';
 import { UserService } from '../../services/UserService';
+import { socketRateLimiter } from '../../utils/rateLimit';
+import { logInfo, logWarn } from '../../utils/logger';
 
 type IoServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type IoSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -57,11 +62,15 @@ type RoomObject = RoomState['objects'][number];
 const state = new StateService();
 const userService = new UserService();
 const EMOTE_IDS = new Set<EmoteId>(['wave', 'dance', 'clap']);
+const AVATAR_STATES = new Set<AvatarState>(['idle', 'walk', 'sit', 'wave', 'dance', 'clap', 'fish']);
+const DIRECTIONS = new Set<number>(Object.values(Direction).filter((value): value is number => typeof value === 'number'));
 const WAITER_HOME: Position = { x: 2, y: 1 };
 const WAITER_COUNTER: Position = { x: 2, y: 0 };
 const WAITER_TICK_MS = 260;
 const WAITER_SPEED = 5.2;
 const WAITER_BUSY_TTL_MS = 60_000;
+const WAITER_QUEUE_LIMIT = 6;
+const WAITER_CALL_COOLDOWN_MS = 1800;
 const PETAL_SERVER_COLLECT_RADIUS_TILES = 1.6;
 
 interface WaiterRuntime {
@@ -83,6 +92,10 @@ function seatPositionFrom(value: ObjectState | undefined): Position | null {
 
 function isEmoteId(value: unknown): value is EmoteId {
   return typeof value === 'string' && EMOTE_IDS.has(value as EmoteId);
+}
+
+function isAvatarState(value: unknown): value is AvatarState {
+  return typeof value === 'string' && AVATAR_STATES.has(value as AvatarState);
 }
 
 function usersById(users: RoomUser[]): Map<string, RoomUser> {
@@ -112,6 +125,24 @@ function isActiveJukebox(state: ReturnType<typeof normalizeJukeboxState>, now = 
   return state.playing && (state.expiresAt === null || state.expiresAt > now);
 }
 
+function withJukeboxHistory(next: JukeboxState, requester: string, now: number): JukeboxState {
+  const title = next.externalTrack?.title ?? jukeboxTitle(next.trackId);
+  const source: 'local' | 'youtube' = next.externalTrack?.provider ?? 'local';
+  return {
+    ...next,
+    history: [
+      {
+        trackId: next.trackId,
+        title,
+        source,
+        requestedBy: requester,
+        startedAt: now,
+      },
+      ...(next.history ?? []),
+    ].slice(0, 8),
+  };
+}
+
 async function currentRoomUser(roomId: string, userId: string): Promise<RoomUser | null> {
   const roomState = await state.getRoomState(roomId);
   return roomState.users.find((user) => user.userId === userId) ?? null;
@@ -119,6 +150,57 @@ async function currentRoomUser(roomId: string, userId: string): Promise<RoomUser
 
 function emitTooFar(socket: IoSocket, message: string): void {
   socket.emit('error', { code: 'TOO_FAR', message });
+}
+
+function socketRateKey(socket: IoSocket, bucket: string): string {
+  return `socket:${bucket}:${socket.data.userId}:${socket.id}`;
+}
+
+function hitSocketRate(socket: IoSocket, bucket: string, limit: number, windowMs: number): boolean {
+  const result = socketRateLimiter.hit(socketRateKey(socket, bucket), limit, windowMs);
+  if (result.allowed) return true;
+  socket.emit('error', { code: 'RATE_LIMIT', message: 'Troppe azioni, rallenta un attimo' });
+  logWarn('socket.rate_limited', {
+    bucket,
+    userId: socket.data.userId,
+    socketId: socket.id,
+    retryAfterMs: result.retryAfterMs,
+  });
+  return false;
+}
+
+function isSafeEventText(value: unknown, maxLength = 80): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= maxLength;
+}
+
+function safeAvatarPart(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+}
+
+function sanitizeAvatarConfig(value: unknown, userId: string, username: string): AvatarConfig {
+  const raw = value && typeof value === 'object' ? value as Partial<AvatarConfig> : {};
+  return {
+    userId,
+    username,
+    body: safeAvatarPart(raw.body),
+    outfit: safeAvatarPart(raw.outfit),
+    hair: safeAvatarPart(raw.hair),
+    hairColor: typeof raw.hairColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw.hairColor) ? raw.hairColor : '#4488ff',
+    accessory: safeAvatarPart(raw.accessory),
+    expression: safeAvatarPart(raw.expression),
+  };
+}
+
+function sanitizeSocketPayload(value: unknown): ObjectState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const output: ObjectState = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>).slice(0, 16)) {
+    if (!/^[a-zA-Z0-9:_-]{1,48}$/.test(key)) continue;
+    if (typeof raw === 'string') output[key] = raw.slice(0, 500);
+    else if (typeof raw === 'number' && Number.isFinite(raw)) output[key] = raw;
+    else if (typeof raw === 'boolean' || raw === null) output[key] = raw;
+  }
+  return output;
 }
 
 async function ensureUserNear(
@@ -363,7 +445,7 @@ async function emitWaiterState(io: IoServer, roomId: string, nextState: WaiterSt
 
 function isWaiterBusy(waiter: WaiterState, now: number): boolean {
   if (now - waiter.updatedAt > WAITER_BUSY_TTL_MS) return false;
-  return waiter.phase !== 'idle' && waiter.phase !== 'delivered';
+  return waiter.phase !== 'idle';
 }
 
 function driveWaiterTo(
@@ -416,9 +498,11 @@ async function startWaiterCall(
   userId: string,
   username: string,
   target: Position,
+  queue: WaiterQueueEntry[] = [],
 ): Promise<void> {
   clearWaiterRuntime(roomId);
   const current = normalizeWaiterState(await state.getObjectState(roomId, WAITER_OBJECT_ID));
+  const now = Date.now();
   const waiter: WaiterState = {
     ...current,
     kind: 'waiter',
@@ -429,7 +513,9 @@ async function startWaiterCall(
     targetY: target.y,
     item: undefined,
     orderId: undefined,
-    updatedAt: Date.now(),
+    queue: queue.length > 0 ? queue : undefined,
+    cooldownUntil: now + WAITER_CALL_COOLDOWN_MS,
+    updatedAt: now,
   };
 
   driveWaiterTo(io, roomId, waiter, target, 'approaching', (arrived) => {
@@ -439,6 +525,31 @@ async function startWaiterCall(
       updatedAt: Date.now(),
     });
   });
+}
+
+async function finishWaiterReturn(io: IoServer, roomId: string, home: WaiterState): Promise<void> {
+  const queue = home.queue ?? [];
+  if (queue.length === 0) {
+    await emitWaiterState(io, roomId, {
+      ...home,
+      phase: 'idle',
+      targetX: undefined,
+      targetY: undefined,
+      queue: undefined,
+      updatedAt: Date.now(),
+    });
+    return;
+  }
+
+  const [next, ...rest] = queue;
+  await startWaiterCall(
+    io,
+    roomId,
+    next.userId,
+    next.username,
+    { x: next.x, y: next.y },
+    rest,
+  );
 }
 
 function startWaiterOrder(
@@ -488,9 +599,9 @@ function startWaiterOrder(
             updatedAt: Date.now(),
           };
           driveWaiterTo(io, roomId, returning, WAITER_HOME, 'returning', (home) => {
-            void emitWaiterState(io, roomId, {
+            void finishWaiterReturn(io, roomId, {
               ...home,
-              phase: 'idle',
+              phase: 'returning',
               targetX: undefined,
               targetY: undefined,
               updatedAt: Date.now(),
@@ -523,6 +634,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
   }
 
   socket.on('join-room', async ({ roomId, avatarConfig }) => {
+    if (!hitSocketRate(socket, 'join-room', 6, 10_000)) return;
     const roomConfig = ROOM_CONFIGS[roomId];
     if (!roomConfig) {
       socket.emit('error', { code: 'ROOM_NOT_FOUND', message: 'Stanza non trovata' });
@@ -536,11 +648,12 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     const spawnPoints = roomConfig.spawnPoints;
     const fallbackSpawn: Position = spawnPoints[currentCount % spawnPoints.length];
     const spawn = await savedSpawnFor(userId, roomId, fallbackSpawn);
+    const safeAvatarConfig = sanitizeAvatarConfig(avatarConfig, userId, username);
 
     const userState = {
       userId,
       username,
-      avatarConfig: { ...avatarConfig, userId, username } as AvatarConfig,
+      avatarConfig: safeAvatarConfig,
       position: spawn,
       state: 'idle' as const,
     };
@@ -560,7 +673,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     const newCount = await state.getUserCount(roomId);
     io.emit('room-users-count', { roomId, count: newCount });
 
-    console.log(`[Room] ${username} joined ${roomId} (${newCount} users)`);
+    logInfo('room.joined', { roomId, userId, username, users: newCount });
   });
 
   socket.on('leave-room', async () => {
@@ -568,8 +681,10 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
   });
 
   socket.on('move', async ({ x, y, direction, state: moveState }) => {
+    if (!hitSocketRate(socket, 'move', 80, 10_000)) return;
     const roomId = socket.data.currentRoom;
     if (!roomId) return;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !DIRECTIONS.has(direction) || !isAvatarState(moveState)) return;
 
     const roomState = await state.getRoomState(roomId);
     const previous = roomState.users.find((user) => user.userId === userId)?.position ?? { x, y };
@@ -578,9 +693,15 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
     await emitPoseChangeWithInterest(io, socket, roomId, userId, previous, { x, y, direction, state: moveState });
   });
 
-  socket.on('interact', async ({ objectId, action, payload }) => {
+  socket.on('interact', async ({ objectId, action, payload: rawPayload }) => {
+    if (!hitSocketRate(socket, 'interact', 24, 10_000)) return;
     const roomId = socket.data.currentRoom;
     if (!roomId) return;
+    if (!isSafeEventText(objectId) || !isSafeEventText(action)) {
+      socket.emit('error', { code: 'INVALID_PAYLOAD', message: 'Interazione non valida' });
+      return;
+    }
+    const payload = sanitizeSocketPayload(rawPayload);
 
     if (objectId === BAR_SERVICE_OBJECT_ID) {
       if (action !== 'pickup-item') {
@@ -613,11 +734,13 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
       const holder = roomState.users.find((user) => user.userId === userId);
       socket.emit('item-granted', { item, petals: paidUser.petals, cost: PETAL_ACTION_COST, source: 'counter' });
       socket.emit('account-updated', { petals: paidUser.petals, stats: { ...paidUser.stats } });
+      logInfo('economy.spend', { userId, source: 'counter', item, amount: PETAL_ACTION_COST, petals: paidUser.petals });
       if (holder) await emitHeldItemToInterested(io, roomId, holder, item, roomState.users);
       return;
     }
 
     if (objectId === PETAL_BLOOM_OBJECT_ID) {
+      if (!hitSocketRate(socket, 'petal', 8, 10_000)) return;
       if (action !== 'petal-collect') {
         socket.emit('error', { code: 'UNKNOWN_INTERACTION', message: 'Azione petali sconosciuta' });
         return;
@@ -663,6 +786,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         source: 'flower',
       });
       socket.emit('account-updated', { petals: nextUser.petals, stats: { ...nextUser.stats } });
+      logInfo('economy.award', { userId, source: 'flower', amount: config.value, petals: nextUser.petals, locationId });
       return;
     }
 
@@ -671,11 +795,6 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
       const current = normalizeWaiterState(await state.getObjectState(roomId, objectId), now);
 
       if (action === 'waiter-call') {
-        if (isWaiterBusy(current, now)) {
-          socket.emit('error', { code: 'WAITER_BUSY', message: 'Il cameriere sta gia servendo qualcuno' });
-          return;
-        }
-
         const caller = await ensureUserNear(
           socket,
           roomId,
@@ -685,10 +804,45 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         );
         if (!caller) return;
 
+        if (current.cooldownUntil && current.cooldownUntil > now && !isWaiterBusy(current, now)) {
+          socket.emit('error', { code: 'WAITER_COOLDOWN', message: 'Aspetta un attimo prima di richiamarlo' });
+          return;
+        }
+
+        if (isWaiterBusy(current, now)) {
+          const queue = current.queue ?? [];
+          if (current.customerId === userId || queue.some((entry) => entry.userId === userId)) {
+            socket.emit('error', { code: 'WAITER_ALREADY_WAITING', message: 'Sei gia in attesa del cameriere' });
+            return;
+          }
+          if (queue.length >= WAITER_QUEUE_LIMIT) {
+            socket.emit('error', { code: 'WAITER_QUEUE_FULL', message: 'La coda del cameriere e piena' });
+            return;
+          }
+
+          const nextQueue: WaiterQueueEntry[] = [
+            ...queue,
+            {
+              userId,
+              username,
+              x: Math.round(caller.position.x),
+              y: Math.round(caller.position.y),
+              requestedAt: now,
+            },
+          ];
+          await emitWaiterState(io, roomId, {
+            ...current,
+            queue: nextQueue,
+            updatedAt: now,
+          });
+          socket.emit('error', { code: 'WAITER_QUEUED', message: `Sei in coda (${nextQueue.length})` });
+          return;
+        }
+
         await startWaiterCall(io, roomId, userId, username, {
           x: Math.round(caller.position.x),
           y: Math.round(caller.position.y),
-        });
+        }, current.queue ?? []);
         return;
       }
 
@@ -719,6 +873,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
           return;
         }
         socket.emit('account-updated', { petals: paidUser.petals, stats: { ...paidUser.stats } });
+        logInfo('economy.spend', { userId, source: 'waiter', item, amount: PETAL_ACTION_COST, petals: paidUser.petals });
 
         startWaiterOrder(io, roomId, {
           ...current,
@@ -820,6 +975,8 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
           return;
         }
         socket.emit('account-updated', { petals: paidUser.petals, stats: { ...paidUser.stats } });
+        next = withJukeboxHistory(next, username, now);
+        logInfo('economy.spend', { userId, source: 'jukebox', amount: JUKEBOX_PLAY_COST, petals: paidUser.petals });
       }
 
       await state.updateObjectState(roomId, objectId, next as unknown as ObjectState);
@@ -919,6 +1076,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
   });
 
   socket.on('emote', async ({ emoteId }) => {
+    if (!hitSocketRate(socket, 'emote', 20, 10_000)) return;
     const roomId = socket.data.currentRoom;
     if (!roomId || !isEmoteId(emoteId)) return;
     const roomState = await state.getRoomState(roomId);
@@ -927,6 +1085,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
   });
 
   socket.on('chat-message', async ({ text }) => {
+    if (!hitSocketRate(socket, 'chat', 8, 10_000)) return;
     const roomId = socket.data.currentRoom;
     if (!roomId) return;
 
@@ -948,17 +1107,19 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
   });
 
   socket.on('hold-item', async ({ item }) => {
+    if (!hitSocketRate(socket, 'hold-item', 20, 10_000)) return;
     const roomId = socket.data.currentRoom;
     if (!roomId) return;
 
-    await state.updateHeldItem(roomId, userId, item);
+    const safeItem = item === null || isHeldItem(item) ? item : null;
+    await state.updateHeldItem(roomId, userId, safeItem);
     const roomState = await state.getRoomState(roomId);
     const holder = roomState.users.find((user) => user.userId === userId);
-    if (holder) await emitHeldItemToInterested(io, roomId, holder, item, roomState.users);
+    if (holder) await emitHeldItemToInterested(io, roomId, holder, safeItem, roomState.users);
   });
 
   socket.on('disconnect', async () => {
     await leaveCurrentRoom();
-    console.log(`[Socket] Disconnected: ${username} (${socket.id})`);
+    logInfo('socket.disconnected', { userId, username, socketId: socket.id });
   });
 }

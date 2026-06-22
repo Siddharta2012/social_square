@@ -2,6 +2,8 @@ import express, { RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
 import type { AvatarConfig, Position } from '@social-square/shared';
 import { UserService, type GoogleProfile, type StoredUser } from '../../services/UserService';
+import { authRateLimiter } from '../../utils/rateLimit';
+import { logInfo, logWarn } from '../../utils/logger';
 
 const router: express.Router = express.Router();
 const userService = new UserService();
@@ -108,6 +110,18 @@ function clientUrlFromRequest(req: express.Request): string {
   } catch {
     return CLIENT_URL;
   }
+}
+
+function clientKey(req: express.Request): string {
+  return req.ip || req.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+}
+
+function rateLimitAuth(req: express.Request, res: express.Response, key: string, limit: number, windowMs: number): boolean {
+  const result = authRateLimiter.hit(`auth:${key}:${clientKey(req)}`, limit, windowMs);
+  if (result.allowed) return false;
+  res.status(429).json({ error: 'RATE_LIMIT', retryAfterMs: result.retryAfterMs });
+  logWarn('auth.rate_limited', { key, ip: clientKey(req), retryAfterMs: result.retryAfterMs });
+  return true;
 }
 
 async function userFromRequest(req: express.Request): Promise<StoredUser | null> {
@@ -227,6 +241,7 @@ const logoutHandler: RequestHandler = (_req, res) => {
 };
 
 const loginHandler: RequestHandler = async (req, res) => {
+  if (rateLimitAuth(req, res, 'login', 8, 60_000)) return;
   if (!DEV_PASSWORD_LOGIN) {
     res.status(403).json({ error: 'Accesso Google richiesto' });
     return;
@@ -249,10 +264,12 @@ const loginHandler: RequestHandler = async (req, res) => {
   const result = await userService.loginOrRegister(trimmed, password);
 
   if (!result) {
+    logWarn('auth.password_failed', { username: trimmed, ip: clientKey(req) });
     res.status(401).json({ error: 'Password errata' });
     return;
   }
 
+  logInfo('auth.password_login', { userId: result.user.userId, isNew: result.isNew });
   res.json({
     token: tokenFor(result.user),
     isNew: result.isNew,
@@ -261,6 +278,7 @@ const loginHandler: RequestHandler = async (req, res) => {
 };
 
 const googleStartHandler: RequestHandler = (req, res) => {
+  if (rateLimitAuth(req, res, 'google_start', 20, 60_000)) return;
   const clientUrl = clientUrlFromRequest(req);
   if (!GOOGLE_ENABLED) {
     res.redirect(`${clientUrl}?authError=${encodeURIComponent('Google non configurato')}`);
@@ -283,6 +301,7 @@ const googleStartHandler: RequestHandler = (req, res) => {
 };
 
 const googleCallbackHandler: RequestHandler = async (req, res) => {
+  if (rateLimitAuth(req, res, 'google_callback', 20, 60_000)) return;
   if (!GOOGLE_ENABLED) {
     res.redirect(`${CLIENT_URL}?authError=${encodeURIComponent('Google non configurato')}`);
     return;
@@ -327,9 +346,11 @@ const googleCallbackHandler: RequestHandler = async (req, res) => {
     const redirect = new URL(statePayload.clientUrl ?? CLIENT_URL);
     redirect.searchParams.set('authToken', appToken);
     redirect.searchParams.set('start', '1');
+    logInfo('auth.google_login', { userId: result.user.userId, isNew: result.isNew });
     res.redirect(redirect.toString());
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Errore Google';
+    logWarn('auth.google_failed', { message });
     res.redirect(`${CLIENT_URL}?authError=${encodeURIComponent(message)}`);
   }
 };

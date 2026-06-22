@@ -168,6 +168,7 @@ interface PetalBloom {
 const PETAL_COLLECT_RADIUS_TILES = 2.75;
 const PETAL_AUTO_COLLECT_RADIUS_TILES = 1.05;
 const PETAL_SPAWN_TICK_MS = 3000;
+const VOICE_MUTE_STORAGE_KEY = 'social-square:voice-muted-users';
 
 export class BarScene extends BaseRoomScene {
   private _network!: NetworkSystem;
@@ -198,6 +199,8 @@ export class BarScene extends BaseRoomScene {
   private _localContextElapsed = 0;
   private _petalCollectElapsed = 0;
   private _mutedVoiceUsers = new Set<string>();
+  private _speakingVoiceUsers = new Set<string>();
+  private _lastSpeakingUiKey = '';
 
   private static readonly BEER_SIPS = 3;
   private static readonly PRETZEL_BITES = 2;
@@ -250,6 +253,7 @@ export class BarScene extends BaseRoomScene {
 
   create(): void {
     super.create();
+    this._loadMutedVoiceUsers();
     this._setupNetwork();
 
     eventBus.on('exit-room', () => this.scene.start('MenuScene'), this);
@@ -310,6 +314,7 @@ export class BarScene extends BaseRoomScene {
       this._syncLocalContext();
     }
     this._syncVoiceSpatial(delta);
+    this._syncJukeboxSpatial();
     this._syncJukeboxExpiry();
     this._petalCollectElapsed += delta;
     if (this._petalCollectElapsed >= 80) {
@@ -765,9 +770,11 @@ export class BarScene extends BaseRoomScene {
     this._remoteAvatars.forEach((avatar, userId) => {
       this.isoSystem.unregister(avatar);
       avatar.destroy();
-      this._voice?.setParticipantVolume(userId, 0);
+      this._voice?.setParticipantSpatial(userId, { volume: 0, pan: 0 });
     });
     this._remoteAvatars.clear();
+    this._speakingVoiceUsers.clear();
+    this._setSpeakingUi([]);
     useGameStore.getState().setUserActionMenu(null);
   }
 
@@ -1038,7 +1045,10 @@ export class BarScene extends BaseRoomScene {
       source: state.externalTrack?.provider ?? 'local',
       expiresAt: state.expiresAt,
       externalUrl: state.externalTrack?.url,
+      requestedBy: state.requestedBy,
+      history: state.history,
     });
+    this._syncJukeboxSpatial();
     if (result.blocked) this._showNotice('Clicca Play nel player del jukebox');
   }
 
@@ -1048,8 +1058,17 @@ export class BarScene extends BaseRoomScene {
 
   private _syncJukeboxForLocation(): void {
     if (this._isInJukeboxLocation()) return;
+    this._jukebox.setSpatial(0, 0);
     void this._jukebox.applyState({ ...this._jukeboxState, playing: false });
     useGameStore.getState().setJukeboxStatus(null);
+  }
+
+  private _syncJukeboxSpatial(): void {
+    if (!this._jukeboxState.playing || !this._isInJukeboxLocation()) return;
+    const local = this._localPosition();
+    if (!local) return;
+    const spatial = this._spatialFrom(local, JUKEBOX_POSITION, 11, 0.08);
+    this._jukebox.setSpatial(spatial.volume, spatial.pan);
   }
 
   private _syncJukeboxExpiry(): void {
@@ -1275,30 +1294,42 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _syncVoiceSpatial(deltaMs: number): void {
-    if (!this._voice?.isReady) return;
     this._voiceSpatialElapsed += deltaMs;
     if (this._voiceSpatialElapsed < 220) return;
     this._voiceSpatialElapsed = 0;
+    if (!this._voice?.isReady) {
+      this._setSpeakingUi([]);
+      return;
+    }
 
     const local = this._localPosition();
     if (!local) return;
 
+    const speakingUsers: Array<{ userId: string; username: string; distance: number; volume: number; pan: number }> = [];
     this._remoteAvatars.forEach((avatar, userId) => {
-      const dx = avatar.worldX - local.x;
-      const dy = avatar.worldY - local.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      const volume = distance <= 2
-        ? 1
-        : Math.max(0.12, 1 - ((distance - 2) / 15) * 0.88);
-      this._voice?.setParticipantVolume(userId, volume);
+      const spatial = this._spatialFrom(local, { x: avatar.worldX, y: avatar.worldY }, 15, 0.1);
+      this._voice?.setParticipantSpatial(userId, spatial);
+      if (this._speakingVoiceUsers.has(userId) && !this._mutedVoiceUsers.has(userId)) {
+        speakingUsers.push({
+          userId,
+          username: avatar.username,
+          distance: spatial.distance,
+          volume: spatial.volume,
+          pan: spatial.pan,
+        });
+      }
     });
+    speakingUsers.sort((a, b) => b.volume - a.volume);
+    this._setSpeakingUi(speakingUsers.slice(0, 4));
   }
 
   private _setRemoteVoiceMuted(userId: string, muted: boolean): void {
     if (muted) this._mutedVoiceUsers.add(userId);
     else this._mutedVoiceUsers.delete(userId);
 
+    this._saveMutedVoiceUsers();
     this._voice?.setParticipantMuted(userId, muted);
+    this._syncVoiceSpatial(999);
     const avatar = this._remoteAvatars.get(userId);
     useGameStore.getState().setUserActionMenu(avatar ? {
       userId,
@@ -1313,10 +1344,59 @@ export class BarScene extends BaseRoomScene {
       this.localAvatar?.setSpeaking(speaking);
       return;
     }
+    if (speaking) this._speakingVoiceUsers.add(userId);
+    else this._speakingVoiceUsers.delete(userId);
     this._remoteAvatars.get(userId)?.setSpeaking(speaking);
+    this._syncVoiceSpatial(999);
   }
 
   // ── Remote avatar management ──────────────────────────────────────────────
+
+  private _spatialFrom(
+    listener: Position,
+    source: Position,
+    maxDistance: number,
+    minVolume: number,
+  ): { volume: number; pan: number; distance: number } {
+    const dx = source.x - listener.x;
+    const dy = source.y - listener.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const nearRadius = 1.4;
+    const t = Phaser.Math.Clamp((distance - nearRadius) / Math.max(1, maxDistance - nearRadius), 0, 1);
+    const eased = t * t * (3 - 2 * t);
+    const volume = Phaser.Math.Clamp(1 - eased, minVolume, 1);
+    const pan = Phaser.Math.Clamp((dx - dy * 0.35) / 8, -1, 1);
+    return { volume, pan, distance };
+  }
+
+  private _setSpeakingUi(users: Array<{ userId: string; username: string; distance: number; volume: number; pan: number }>): void {
+    const key = users
+      .map((user) => `${user.userId}:${Math.round(user.distance * 10)}:${Math.round(user.pan * 10)}`)
+      .join('|');
+    if (key === this._lastSpeakingUiKey) return;
+    this._lastSpeakingUiKey = key;
+    useGameStore.getState().setSpeakingUsers(users);
+  }
+
+  private _loadMutedVoiceUsers(): void {
+    try {
+      const raw = localStorage.getItem(VOICE_MUTE_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      this._mutedVoiceUsers = new Set(Array.isArray(parsed)
+        ? parsed.filter((value): value is string => typeof value === 'string')
+        : []);
+    } catch {
+      this._mutedVoiceUsers = new Set();
+    }
+  }
+
+  private _saveMutedVoiceUsers(): void {
+    try {
+      localStorage.setItem(VOICE_MUTE_STORAGE_KEY, JSON.stringify([...this._mutedVoiceUsers]));
+    } catch {
+      // Storage can be unavailable in private contexts.
+    }
+  }
 
   private _spawnRemote(
     userId: string,
@@ -1374,7 +1454,9 @@ export class BarScene extends BaseRoomScene {
     this.isoSystem.unregister(avatar);
     avatar.destroy();
     this._remoteAvatars.delete(userId);
-    this._voice?.setParticipantVolume(userId, 0);
+    this._voice?.setParticipantSpatial(userId, { volume: 0, pan: 0 });
+    this._speakingVoiceUsers.delete(userId);
+    this._syncVoiceSpatial(999);
     if (useGameStore.getState().userActionMenu?.userId === userId) {
       useGameStore.getState().setUserActionMenu(null);
     }
@@ -1410,6 +1492,7 @@ export class BarScene extends BaseRoomScene {
     void this._voice?.disconnect();
     this._remoteAvatars.forEach((a) => a.destroy());
     this._remoteAvatars.clear();
+    this._speakingVoiceUsers.clear();
     this._destroyWaiterAvatar();
     this._petalSpawnTimer?.remove(false);
     this._petalSpawnTimer = null;
@@ -1437,6 +1520,7 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().setUsersInRoom(0);
     useGameStore.getState().setVoiceAvailable(false);
     useGameStore.getState().setVoiceMuted(false);
+    useGameStore.getState().setSpeakingUsers([]);
     useGameStore.getState().setHeldItem(null);
     useGameStore.getState().setJukeboxStatus(null);
     useGameStore.getState().setLocalAvatarState('idle');
