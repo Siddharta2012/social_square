@@ -26,12 +26,32 @@ export interface UserActionMenu {
   muted: boolean;
 }
 
+export interface WorldDebugMetrics {
+  fps: number;
+  frameMs: number;
+  locationName: string | null;
+  routeHint: string | null;
+  worldLoading: WorldLoadingState;
+  activeSectors: number;
+  loadedSectors: number;
+  inFlightSectors: number;
+  renderedSectors: number;
+  worldSectors: number;
+  decorations: number;
+  lights: number;
+  isoObjects: number;
+  isoDirty: boolean;
+  localTile: string | null;
+  extra: Record<string, string | number | boolean | null>;
+}
+
 interface GameState {
   isConnected: boolean;
   currentRoomId: string | null;
   roomName: string | null;
   locationName: string | null;
   routeHint: string | null;
+  travelTargetName: string | null;
   usersInRoom: number;
   petals: number;
   showUsernameForm: boolean;
@@ -43,6 +63,7 @@ interface GameState {
   setRoomName: (name: string | null) => void;
   setLocationName: (name: string | null) => void;
   setRouteHint: (hint: string | null) => void;
+  setTravelTargetName: (name: string | null) => void;
   setUsersInRoom: (count: number) => void;
   setPetals: (amount: number) => void;
   addPetals: (amount: number) => void;
@@ -72,6 +93,11 @@ interface GameState {
   setShowWorldMap: (show: boolean) => void;
   userActionMenu: UserActionMenu | null;
   setUserActionMenu: (menu: UserActionMenu | null) => void;
+  showDebugOverlay: boolean;
+  setShowDebugOverlay: (show: boolean) => void;
+  toggleDebugOverlay: () => void;
+  worldDebugMetrics: WorldDebugMetrics | null;
+  setWorldDebugMetrics: (metrics: WorldDebugMetrics | null) => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -80,6 +106,7 @@ export const useGameStore = create<GameState>((set) => ({
   roomName: null,
   locationName: null,
   routeHint: null,
+  travelTargetName: null,
   usersInRoom: 0,
   petals: 0,
   showUsernameForm: false,
@@ -91,6 +118,7 @@ export const useGameStore = create<GameState>((set) => ({
   setRoomName: (name) => set({ roomName: name }),
   setLocationName: (name) => set({ locationName: name }),
   setRouteHint: (hint) => set({ routeHint: hint }),
+  setTravelTargetName: (name) => set({ travelTargetName: name }),
   setUsersInRoom: (count) => set({ usersInRoom: count }),
   setPetals: (amount) => set({ petals: Math.max(0, Math.floor(amount)) }),
   addPetals: (amount) => set((state) => ({
@@ -137,4 +165,9 @@ export const useGameStore = create<GameState>((set) => ({
   setShowWorldMap: (show) => set({ showWorldMap: show }),
   userActionMenu: null,
   setUserActionMenu: (menu) => set({ userActionMenu: menu }),
+  showDebugOverlay: false,
+  setShowDebugOverlay: (show) => set({ showDebugOverlay: show }),
+  toggleDebugOverlay: () => set((state) => ({ showDebugOverlay: !state.showDebugOverlay })),
+  worldDebugMetrics: null,
+  setWorldDebugMetrics: (metrics) => set({ worldDebugMetrics: metrics }),
 }));

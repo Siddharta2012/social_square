@@ -96,6 +96,18 @@ export class IsometricSystem {
     this._dirty = true;
   }
 
+  clear(): void {
+    this._objects = [];
+    this._dirty = false;
+  }
+
+  stats(): { objects: number; dirty: boolean } {
+    return {
+      objects: this._objects.length,
+      dirty: this._dirty,
+    };
+  }
+
   /** Call once per frame; only re-sorts when dirty. */
   update(): void {
     if (!this._dirty) return;

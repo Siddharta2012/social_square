@@ -13,6 +13,14 @@ export type LocationId =
   | '2,2';
 
 export type ExitDirection = 'north' | 'south' | 'east' | 'west';
+export type LocationKind = 'bar' | 'garden' | 'square' | 'shops' | 'waterfront' | 'residential' | 'villa';
+
+export const EXIT_DIRECTION_LABELS: Record<ExitDirection, string> = {
+  north: 'Nord',
+  south: 'Sud',
+  east: 'Est',
+  west: 'Ovest',
+};
 
 export interface LocationExit {
   id: string;
@@ -27,6 +35,8 @@ export interface LocationDefinition {
   sx: number;
   sy: number;
   name: string;
+  kind: LocationKind;
+  description: string;
   spawn: Position;
   fastTravel: boolean;
   exits: LocationExit[];
@@ -45,6 +55,8 @@ const DEFINITIONS: LocationDefinition[] = [
     sx: 0,
     sy: 0,
     name: 'Bar interno',
+    kind: 'bar',
+    description: 'Bancone, jukebox e tavoli interni del Bar Bora H24.',
     spawn: { x: 9, y: 14 },
     fastTravel: true,
     exits: [
@@ -56,6 +68,8 @@ const DEFINITIONS: LocationDefinition[] = [
     sx: 0,
     sy: 1,
     name: 'Bar giardino',
+    kind: 'garden',
+    description: 'Giardino esterno del bar, con fiori, sedute e passaggio verso la piazza.',
     spawn: { x: 10, y: 32 },
     fastTravel: true,
     exits: [
@@ -68,6 +82,8 @@ const DEFINITIONS: LocationDefinition[] = [
     sx: 1,
     sy: 1,
     name: 'Piazza del paese',
+    kind: 'square',
+    description: 'Nodo centrale del paese e collegamento verso botteghe, ville e quartieri.',
     spawn: { x: 36, y: 36 },
     fastTravel: true,
     exits: [
@@ -82,6 +98,8 @@ const DEFINITIONS: LocationDefinition[] = [
     sx: 1,
     sy: 0,
     name: 'Via delle botteghe',
+    kind: 'shops',
+    description: 'Strada commerciale con insegne, vetrine e uscita verso il lungocanale.',
     spawn: { x: 34, y: 12 },
     fastTravel: true,
     exits: [
@@ -94,6 +112,8 @@ const DEFINITIONS: LocationDefinition[] = [
     sx: 2,
     sy: 0,
     name: 'Lungocanale',
+    kind: 'waterfront',
+    description: "Passeggiata sull'acqua, più quieta e aperta rispetto al centro.",
     spawn: { x: 58, y: 12 },
     fastTravel: true,
     exits: [
@@ -106,6 +126,8 @@ const DEFINITIONS: LocationDefinition[] = [
     sx: 2,
     sy: 1,
     name: 'Quartiere residenziale',
+    kind: 'residential',
+    description: 'Case, cortili e percorsi laterali fuori dal flusso della piazza.',
     spawn: { x: 58, y: 36 },
     fastTravel: true,
     exits: [
@@ -118,6 +140,8 @@ const DEFINITIONS: LocationDefinition[] = [
     sx: 1,
     sy: 2,
     name: 'Vialone delle Ville',
+    kind: 'residential',
+    description: 'Viale di collegamento verso le ville Aurora e Belvedere.',
     spawn: { x: 34, y: 56 },
     fastTravel: true,
     exits: [
@@ -131,6 +155,8 @@ const DEFINITIONS: LocationDefinition[] = [
     sx: 0,
     sy: 2,
     name: 'Villa Aurora',
+    kind: 'villa',
+    description: 'Villa occidentale, raccolta e raggiungibile dal vialone.',
     spawn: { x: 12, y: 58 },
     fastTravel: true,
     exits: [
@@ -142,6 +168,8 @@ const DEFINITIONS: LocationDefinition[] = [
     sx: 2,
     sy: 2,
     name: 'Villa Belvedere',
+    kind: 'villa',
+    description: 'Villa orientale con accesso dal lato est del vialone.',
     spawn: { x: 60, y: 58 },
     fastTravel: true,
     exits: [
@@ -191,4 +219,40 @@ export function fastTravelLocations(): LocationDefinition[] {
 
 export function targetName(exit: LocationExit): string {
   return locationForId(exit.targetId)?.name ?? exit.targetId;
+}
+
+export function validateLocationDefinitions(): string[] {
+  const issues: string[] = [];
+  const seen = new Set<LocationId>();
+
+  for (const definition of DEFINITIONS) {
+    if (seen.has(definition.id)) issues.push(`Duplicate location id ${definition.id}`);
+    seen.add(definition.id);
+
+    if (definition.id !== sectorKey(definition.sx, definition.sy)) {
+      issues.push(`${definition.id} does not match sector ${definition.sx},${definition.sy}`);
+    }
+
+    if (locationIdForPosition(definition.spawn) !== definition.id) {
+      issues.push(`${definition.id} spawn is outside its sector`);
+    }
+
+    if (!definition.description.trim()) {
+      issues.push(`${definition.id} is missing a description`);
+    }
+
+    for (const exit of definition.exits) {
+      if (!DEFINITIONS_BY_ID.has(exit.targetId)) {
+        issues.push(`${definition.id}:${exit.id} targets missing ${exit.targetId}`);
+      }
+      if (locationIdForPosition(exit.trigger) !== definition.id) {
+        issues.push(`${definition.id}:${exit.id} trigger is outside source location`);
+      }
+      if (locationIdForPosition(exit.arrival) !== exit.targetId) {
+        issues.push(`${definition.id}:${exit.id} arrival is outside target location`);
+      }
+    }
+  }
+
+  return issues;
 }

@@ -11,6 +11,14 @@ export interface WorldStreamerCallbacks {
   onLoadingChange?: (state: LoadingState) => void;
 }
 
+export interface WorldStreamerStats {
+  activeKeys: string[];
+  loadedKeys: string[];
+  absentKeys: string[];
+  inFlightKeys: string[];
+  initialized: boolean;
+}
+
 /** Keeps the WorldMap populated with exactly the current screen/location. */
 export class WorldStreamer {
   private _activeKeys = new Set<string>();
@@ -53,6 +61,30 @@ export class WorldStreamer {
     for (const key of keysToLoad) await this._loadKey(key);
 
     this._initialized = true;
+    this.callbacks.onLoadingChange?.(null);
+  }
+
+  stats(): WorldStreamerStats {
+    return {
+      activeKeys: [...this._activeKeys],
+      loadedKeys: [...this._loadedKeys],
+      absentKeys: [...this._absentKeys],
+      inFlightKeys: [...this._inFlight],
+      initialized: this._initialized,
+    };
+  }
+
+  destroy(): void {
+    for (const key of [...this._loadedKeys]) {
+      const [sx, sy] = this._parseKey(key);
+      this.map.removeSector(sx, sy);
+      this.callbacks.onSectorUnload?.(sx, sy);
+    }
+    this._activeKeys.clear();
+    this._loadedKeys.clear();
+    this._absentKeys.clear();
+    this._inFlight.clear();
+    this._initialized = false;
     this.callbacks.onLoadingChange?.(null);
   }
 

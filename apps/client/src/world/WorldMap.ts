@@ -13,8 +13,16 @@ export class WorldMap {
     this._sectors.delete(sectorKey(sx, sy));
   }
 
+  clear(): void {
+    this._sectors.clear();
+  }
+
   hasSector(sx: number, sy: number): boolean {
     return this._sectors.has(sectorKey(sx, sy));
+  }
+
+  stats(): { sectors: number } {
+    return { sectors: this._sectors.size };
   }
 
   getTile(gx: number, gy: number): TileData | null {

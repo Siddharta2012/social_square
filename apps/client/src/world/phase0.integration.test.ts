@@ -4,7 +4,7 @@ import { SectorLoader } from './SectorLoader';
 import { WorldMap } from './WorldMap';
 import { WorldStreamer } from './WorldStreamer';
 import { SECTOR_REGISTRY } from './sectors';
-import { LOCATION_DEFINITIONS, exitsForLocation, locationForId } from './locations';
+import { LOCATION_DEFINITIONS, exitsForLocation, locationForId, validateLocationDefinitions } from './locations';
 
 async function loadAt(x: number, y: number): Promise<WorldMap> {
   const map = new WorldMap();
@@ -18,6 +18,35 @@ describe('phase 0 world integration', () => {
     const map = await loadAt(9, 14);
     expect(map.hasSector(0, 0)).toBe(true);
     expect(map.hasSector(0, 1)).toBe(false);
+    expect(map.stats().sectors).toBe(1);
+  });
+
+  it('keeps streamer stats scoped to a single active location and clears on destroy', async () => {
+    const map = new WorldMap();
+    const streamer = new WorldStreamer(map, new SectorLoader(SECTOR_REGISTRY));
+
+    await streamer.update(9, 14);
+    expect(streamer.stats().activeKeys).toEqual(['0,0']);
+    expect(streamer.stats().loadedKeys).toEqual(['0,0']);
+    expect(map.stats().sectors).toBe(1);
+
+    await streamer.update(9, 25);
+    expect(streamer.stats().activeKeys).toEqual(['0,1']);
+    expect(streamer.stats().loadedKeys).toEqual(['0,1']);
+    expect(map.hasSector(0, 0)).toBe(false);
+    expect(map.hasSector(0, 1)).toBe(true);
+
+    streamer.destroy();
+    expect(streamer.stats().loadedKeys).toEqual([]);
+    expect(map.stats().sectors).toBe(0);
+  });
+
+  it('keeps the location graph internally valid', () => {
+    expect(validateLocationDefinitions()).toEqual([]);
+    for (const location of LOCATION_DEFINITIONS) {
+      expect(location.description.trim().length).toBeGreaterThan(0);
+      expect(location.id).toBe(`${location.sx},${location.sy}`);
+    }
   });
 
   it('keeps bar fixtures blocked while the exit trigger is walkable', async () => {

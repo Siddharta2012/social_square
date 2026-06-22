@@ -198,6 +198,7 @@ export class BarScene extends BaseRoomScene {
   private _lastTravelAt = 0;
   private _voiceConnectSeq = 0;
   private _voiceSpatialElapsed = 0;
+  private _localContextElapsed = 0;
   private _mutedVoiceUsers = new Set<string>();
 
   private static readonly BEER_SIPS = 3;
@@ -228,13 +229,18 @@ export class BarScene extends BaseRoomScene {
   }
 
   protected override onTileInteract(tileX: number, tileY: number): boolean {
-    const seat = SEAT_DEFINITIONS.find((candidate) => candidate.x === tileX && candidate.y === tileY);
+    const currentLocationId = this._currentLocationId();
+    const seat = SEAT_DEFINITIONS.find((candidate) => (
+      locationIdForPosition(candidate) === currentLocationId &&
+      candidate.x === tileX &&
+      candidate.y === tileY
+    ));
     if (seat) {
       this._beginSeatInteraction(seat);
       return true;
     }
 
-    if (tileX === JUKEBOX_POSITION.x && tileY === JUKEBOX_POSITION.y) {
+    if (currentLocationId === '0,0' && tileX === JUKEBOX_POSITION.x && tileY === JUKEBOX_POSITION.y) {
       this._requestJukeboxNext();
       return true;
     }
@@ -268,7 +274,7 @@ export class BarScene extends BaseRoomScene {
     eventBus.on('jukebox-play-url', (url: string) => this._requestJukeboxPlayUrl(url), this);
     useGameStore.getState().clearChatMessages();
 
-    this._createStations();
+    this._rebuildLocationStations();
     this._rebuildExitStations();
     this._startPetalSpawns();
 
@@ -298,43 +304,64 @@ export class BarScene extends BaseRoomScene {
     this._updatePendingSeat();
     this._updatePendingExit();
     this._checkExitTileTravel();
-    this._syncLocalContext();
+    this._localContextElapsed += delta;
+    if (this._localContextElapsed >= 160) {
+      this._localContextElapsed = 0;
+      this._syncLocalContext();
+    }
     this._syncVoiceSpatial(delta);
     this._syncJukeboxExpiry();
   }
 
+  protected override collectDebugExtras(): Record<string, string | number | boolean | null> {
+    return {
+      remotes: this._remoteAvatars.size,
+      petalBlooms: this._petalBlooms.length,
+      exitStations: this._exitStations.length,
+      interactStations: this._stations.length,
+      voiceReady: this._voice?.isReady ?? false,
+      jukeboxPlaying: this._jukeboxState.playing,
+    };
+  }
+
   // ── Interactive stations ────────────────────────────────────────────────────
 
-  private _createStations(): void {
-    this._stations.push(new InteractStation({
-      scene: this, worldX: 2, worldY: 0,
-      label: `Spillatore - ${PETAL_ACTION_COST} petali`,
-      draw: drawBeerTap,
-      hitWidth: 26, hitHeight: 60,
-      depth: BarScene.COUNTER_FIXTURE_DEPTH,
-      ambientGlow: true,
-      onInteract: () => this._pickUpFromStation('beer', { x: 2, y: 0 }),
-    }));
+  private _rebuildLocationStations(): void {
+    this._destroyLocationStations();
+    const locationId = this._currentLocationId();
 
-    this._stations.push(new InteractStation({
-      scene: this, worldX: 6, worldY: 0,
-      label: `Pretzel - ${PETAL_ACTION_COST} petali`,
-      draw: drawPretzelStand,
-      hitWidth: 30, hitHeight: 44,
-      depth: BarScene.COUNTER_FIXTURE_DEPTH,
-      ambientGlow: true,
-      onInteract: () => this._pickUpFromStation('pretzel', { x: 6, y: 0 }),
-    }));
+    if (locationId === '0,0') {
+      this._stations.push(new InteractStation({
+        scene: this, worldX: 2, worldY: 0,
+        label: `Spillatore - ${PETAL_ACTION_COST} petali`,
+        draw: drawBeerTap,
+        hitWidth: 26, hitHeight: 60,
+        depth: BarScene.COUNTER_FIXTURE_DEPTH,
+        ambientGlow: true,
+        onInteract: () => this._pickUpFromStation('beer', { x: 2, y: 0 }),
+      }));
 
-    this._stations.push(new InteractStation({
-      scene: this, worldX: JUKEBOX_POSITION.x, worldY: JUKEBOX_POSITION.y,
-      label: 'Jukebox - click per cambiare brano',
-      draw: drawHotspot,
-      hitWidth: 54, hitHeight: 62,
-      onInteract: () => this._requestJukeboxNext(),
-    }));
+      this._stations.push(new InteractStation({
+        scene: this, worldX: 6, worldY: 0,
+        label: `Pretzel - ${PETAL_ACTION_COST} petali`,
+        draw: drawPretzelStand,
+        hitWidth: 30, hitHeight: 44,
+        depth: BarScene.COUNTER_FIXTURE_DEPTH,
+        ambientGlow: true,
+        onInteract: () => this._pickUpFromStation('pretzel', { x: 6, y: 0 }),
+      }));
+
+      this._stations.push(new InteractStation({
+        scene: this, worldX: JUKEBOX_POSITION.x, worldY: JUKEBOX_POSITION.y,
+        label: 'Jukebox - click per cambiare brano',
+        draw: drawHotspot,
+        hitWidth: 54, hitHeight: 62,
+        onInteract: () => this._requestJukeboxNext(),
+      }));
+    }
 
     for (const seat of SEAT_DEFINITIONS) {
+      if (locationIdForPosition(seat) !== locationId) continue;
       this._stations.push(new InteractStation({
         scene: this, worldX: seat.x, worldY: seat.y,
         label: `${seat.label} - click per sederti`,
@@ -344,6 +371,11 @@ export class BarScene extends BaseRoomScene {
         onInteract: () => this._beginSeatInteraction(seat),
       }));
     }
+  }
+
+  private _destroyLocationStations(): void {
+    this._stations.forEach((station) => station.destroy());
+    this._stations = [];
   }
 
   private _pickUpFromStation(item: HeldItem, position: Position): void {
@@ -406,9 +438,11 @@ export class BarScene extends BaseRoomScene {
     const local = this._localPosition();
     if (!local) return;
 
-    const location = locationForPosition(local).name;
-    const nearJukebox = this._isNear(JUKEBOX_POSITION);
-    const nearWaiter = this._isNear(this._waiterPosition());
+    const locationInfo = locationForPosition(local);
+    const location = locationInfo.name;
+    const inBarInterior = locationInfo.id === '0,0';
+    const nearJukebox = inBarInterior && this._isNear(JUKEBOX_POSITION);
+    const nearWaiter = inBarInterior && this._isNear(this._waiterPosition());
     const store = useGameStore.getState();
     const canAffordAction = store.petals >= PETAL_ACTION_COST;
     const nearbyExit = this._nearestExit(local);
@@ -593,13 +627,22 @@ export class BarScene extends BaseRoomScene {
     this._network?.emitMove(position.x, position.y, Direction.SE, 'idle', true);
     this._destroyAllRemotes();
     this._clearPetalBlooms();
+    this._destroyLocationStations();
     this._lastLocalContextKey = '';
-    useGameStore.getState().setLocationName(location.name);
-    useGameStore.getState().setRouteHint(null);
+    const store = useGameStore.getState();
+    store.setLocationName(location.name);
+    store.setRouteHint(null);
+    store.setTravelTargetName(location.name);
     this._showNotice(location.name);
 
-    await this.refreshWorldAt(position.x, position.y);
+    try {
+      await this.refreshWorldAt(position.x, position.y);
+    } finally {
+      useGameStore.getState().setTravelTargetName(null);
+    }
+    this._rebuildLocationStations();
     this._rebuildExitStations();
+    this._applyWaiterState(this._waiterState);
     this._syncJukeboxForLocation();
     this._syncLocalContext();
     void this._connectVoiceForCurrentLocation();
@@ -696,6 +739,10 @@ export class BarScene extends BaseRoomScene {
 
   private _callWaiter(): void {
     if (!this.localAvatar) return;
+    if (!this._isInWaiterLocation()) {
+      this._showNotice('Cameriere disponibile al bar');
+      return;
+    }
     if (!this._isNear(this._waiterPosition())) {
       this._showNotice('Avvicinati al cameriere');
       return;
@@ -708,6 +755,10 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _placeWaiterOrder(item: OrderItemId): void {
+    if (!this._isInWaiterLocation()) {
+      this._showNotice('Ordini disponibili al bar');
+      return;
+    }
     if (!this._isNear(this._waiterPosition())) {
       this._showNotice('Avvicinati al cameriere');
       return;
@@ -735,9 +786,23 @@ export class BarScene extends BaseRoomScene {
     return avatar;
   }
 
+  private _destroyWaiterAvatar(): void {
+    if (!this._waiterAvatar) return;
+    this.isoSystem.unregister(this._waiterAvatar);
+    this._waiterAvatar.destroy();
+    this._waiterAvatar = null;
+  }
+
   private _applyWaiterState(rawState: unknown): void {
     const waiter = normalizeWaiterState(rawState);
     this._waiterState = waiter;
+
+    if (!this._isInWaiterLocation()) {
+      this._destroyWaiterAvatar();
+      useGameStore.getState().setWaiterStatus(null);
+      return;
+    }
+
     useGameStore.getState().setWaiterStatus(waiter);
 
     const avatar = this._ensureWaiterAvatar(waiter);
@@ -763,7 +828,15 @@ export class BarScene extends BaseRoomScene {
     }
   }
 
+  private _isInWaiterLocation(): boolean {
+    return this._currentLocationId() === '0,0';
+  }
+
   private _requestJukeboxToggle(): void {
+    if (!this._isInJukeboxLocation()) {
+      this._showNotice('Jukebox disponibile al bar');
+      return;
+    }
     if (!this._isNear(JUKEBOX_POSITION)) {
       this._showNotice('Avvicinati al jukebox');
       return;
@@ -783,6 +856,10 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _requestJukeboxNext(): void {
+    if (!this._isInJukeboxLocation()) {
+      this._showNotice('Jukebox disponibile al bar');
+      return;
+    }
     if (!this._isNear(JUKEBOX_POSITION)) {
       this._showNotice('Avvicinati al jukebox');
       return;
@@ -802,6 +879,10 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _requestJukeboxPlayUrl(url: string): void {
+    if (!this._isInJukeboxLocation()) {
+      this._showNotice('Jukebox disponibile al bar');
+      return;
+    }
     if (!this._isNear(JUKEBOX_POSITION)) {
       this._showNotice('Avvicinati al jukebox');
       return;
@@ -890,6 +971,7 @@ export class BarScene extends BaseRoomScene {
     }
 
     if (occupiedBy === this._myUserId && x !== null && y !== null) {
+      if (locationIdForPosition({ x, y }) !== this._currentLocationId()) return;
       this._seatedSeatId = objectId;
       this._pendingSeat = null;
       this.setLocalAvatarTile(x, y, 'sit');
@@ -1198,16 +1280,14 @@ export class BarScene extends BaseRoomScene {
     void this._voice?.disconnect();
     this._remoteAvatars.forEach((a) => a.destroy());
     this._remoteAvatars.clear();
-    this._waiterAvatar?.destroy();
-    this._waiterAvatar = null;
+    this._destroyWaiterAvatar();
     this._petalSpawnTimer?.remove(false);
     this._petalSpawnTimer = null;
     this._petalBlooms.forEach((bloom) => bloom.station.destroy());
     this._petalBlooms = [];
     this._exitStations.forEach((station) => station.destroy());
     this._exitStations = [];
-    this._stations.forEach((s) => s.destroy());
-    this._stations = [];
+    this._destroyLocationStations();
     this._seatOccupants.clear();
     this._pendingSeat = null;
     this._seatedSeatId = null;
@@ -1221,6 +1301,7 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().setRoomName(null);
     useGameStore.getState().setLocationName(null);
     useGameStore.getState().setRouteHint(null);
+    useGameStore.getState().setTravelTargetName(null);
     useGameStore.getState().setShowWorldMap(false);
     useGameStore.getState().setUserActionMenu(null);
     useGameStore.getState().setUsersInRoom(0);
@@ -1231,6 +1312,7 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().setLocalAvatarState('idle');
     useGameStore.getState().clearChatMessages();
     useGameStore.getState().setWaiterStatus(null);
+    useGameStore.getState().setWorldDebugMetrics(null);
     useGameStore.getState().setActionAvailability({
       nearJukebox: false,
       nearWaiter: false,

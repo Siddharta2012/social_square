@@ -28,6 +28,7 @@ export const HUD: React.FC = () => {
   const roomName = useGameStore((s) => s.roomName);
   const locationName = useGameStore((s) => s.locationName);
   const routeHint = useGameStore((s) => s.routeHint);
+  const travelTargetName = useGameStore((s) => s.travelTargetName);
   const usersInRoom = useGameStore((s) => s.usersInRoom);
   const petals = useGameStore((s) => s.petals);
   const voiceAvailable = useGameStore((s) => s.voiceAvailable);
@@ -44,6 +45,8 @@ export const HUD: React.FC = () => {
   const setShowWorldMap = useGameStore((s) => s.setShowWorldMap);
   const userActionMenu = useGameStore((s) => s.userActionMenu);
   const setUserActionMenu = useGameStore((s) => s.setUserActionMenu);
+  const showDebugOverlay = useGameStore((s) => s.showDebugOverlay);
+  const worldDebugMetrics = useGameStore((s) => s.worldDebugMetrics);
   const userId = useUserStore((s) => s.userId);
   const username = useUserStore((s) => s.username);
   const token = useUserStore((s) => s.token);
@@ -65,6 +68,21 @@ export const HUD: React.FC = () => {
   const jukeboxTimeLeft = jukeboxSecondsLeft > 0
     ? `${Math.floor(jukeboxSecondsLeft / 60)}:${String(jukeboxSecondsLeft % 60).padStart(2, '0')}`
     : '';
+  const debugRows = worldDebugMetrics
+    ? [
+      ['fps', worldDebugMetrics.fps || '-'],
+      ['frame', `${worldDebugMetrics.frameMs}ms`],
+      ['loc', worldDebugMetrics.locationName ?? '-'],
+      ['route', worldDebugMetrics.routeHint ?? '-'],
+      ['load', worldDebugMetrics.worldLoading ?? '-'],
+      ['tile', worldDebugMetrics.localTile ?? '-'],
+      ['stream', `${worldDebugMetrics.activeSectors}/${worldDebugMetrics.loadedSectors}/${worldDebugMetrics.inFlightSectors}`],
+      ['world', `${worldDebugMetrics.worldSectors} map / ${worldDebugMetrics.renderedSectors} draw`],
+      ['decor', `${worldDebugMetrics.decorations} obj / ${worldDebugMetrics.lights} luci`],
+      ['iso', `${worldDebugMetrics.isoObjects}${worldDebugMetrics.isoDirty ? ' dirty' : ''}`],
+      ...Object.entries(worldDebugMetrics.extra).map(([key, value]) => [key, String(value ?? '-')]),
+    ] as Array<[string, string | number]>
+    : [];
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -457,8 +475,13 @@ export const HUD: React.FC = () => {
                   key={location.id}
                   style={{
                     ...smallButtonStyle,
-                    height: '44px',
+                    height: '68px',
                     textAlign: 'left',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    justifyContent: 'center',
+                    gap: '3px',
                     color: location.name === locationName ? '#ffe14d' : '#aaaaff',
                     borderColor: location.name === locationName ? 'rgba(255,225,77,0.5)' : 'rgba(150,150,255,0.35)',
                   }}
@@ -467,7 +490,10 @@ export const HUD: React.FC = () => {
                     eventBus.emit('fast-travel', location.id);
                   }}
                 >
-                  {location.name}
+                  <span style={{ fontWeight: 700 }}>{location.name}</span>
+                  <span style={{ color: '#7777aa', fontSize: '9px', lineHeight: 1.25 }}>
+                    {location.description}
+                  </span>
                 </button>
               ))}
             </div>
@@ -769,7 +795,54 @@ export const HUD: React.FC = () => {
           color: '#8888cc', fontFamily: 'monospace', fontSize: '11px',
           pointerEvents: 'none',
         }}>
-          Caricamento area...
+          {travelTargetName ? `Verso ${travelTargetName}...` : 'Caricamento area...'}
+        </div>
+      )}
+
+      {inRoom && showDebugOverlay && (
+        <div style={{
+          position: 'absolute',
+          top: '52px',
+          left: '12px',
+          zIndex: 151,
+          minWidth: '220px',
+          maxWidth: 'min(340px, calc(100vw - 24px))',
+          background: 'rgba(4,6,14,0.86)',
+          border: '1px solid rgba(120,200,255,0.35)',
+          borderRadius: '4px',
+          padding: '8px 9px',
+          color: '#bfe8ff',
+          fontFamily: 'monospace',
+          fontSize: '10px',
+          pointerEvents: 'none',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.28)',
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: '12px',
+            marginBottom: '5px',
+            color: '#fff4d0',
+            fontWeight: 700,
+          }}>
+            <span>Performance</span>
+            <span>F3</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '76px 1fr', gap: '3px 8px' }}>
+            {debugRows.map(([label, value]) => (
+              <React.Fragment key={label}>
+                <span style={{ color: '#6f94aa' }}>{label}</span>
+                <span style={{
+                  color: '#d7f5ff',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {value}
+                </span>
+              </React.Fragment>
+            ))}
+          </div>
         </div>
       )}
 

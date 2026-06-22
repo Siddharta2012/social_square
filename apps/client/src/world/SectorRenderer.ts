@@ -67,6 +67,20 @@ export class SectorRenderer {
     }
   }
 
+  stats(): { sectors: number; decorations: number; lights: number } {
+    let decorations = 0;
+    let lights = 0;
+    for (const layer of this._layers.values()) {
+      decorations += layer.decorations.length;
+      lights += layer.lights.length;
+    }
+    return {
+      sectors: this._layers.size,
+      decorations,
+      lights,
+    };
+  }
+
   setNightFactor(factor: number): void {
     this._nightFactor = Phaser.Math.Clamp(factor, 0, 1);
     for (const layer of this._layers.values()) this._applyNightFactorTo(layer.lights);

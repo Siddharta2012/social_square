@@ -11,7 +11,7 @@ import { Avatar } from '../../entities/Avatar';
 import { CameraSystem } from '../../systems/CameraSystem';
 import { IsometricSystem } from '../../systems/IsometricSystem';
 import { MovementSystem } from '../../systems/MovementSystem';
-import { useGameStore } from '../../store/gameStore';
+import { useGameStore, type WorldDebugMetrics } from '../../store/gameStore';
 import { SectorLoader } from '../../world/SectorLoader';
 import { SectorRenderer } from '../../world/SectorRenderer';
 import { WorldMap } from '../../world/WorldMap';
@@ -47,6 +47,12 @@ export abstract class BaseRoomScene extends Phaser.Scene {
   private _keyboardStepCooldown = 0;
   private _keyboardDriving = false;
   private _localAvatarStateOverride: AvatarState | null = null;
+  private _atmosphereElapsed = 0;
+  private _hoverElapsed = 0;
+  private _debugElapsed = 0;
+  private _debugFrames = 0;
+  private _debugFps = 0;
+  private _lastFrameMs = 0;
 
   protected abstract getWorldConfig(): WorldConfig;
 
@@ -98,8 +104,11 @@ export abstract class BaseRoomScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     const deltaSeconds = delta / 1000;
-    this._updateAtmosphere(deltaSeconds);
-    if (!this.localAvatar) return;
+    this._updateAtmosphereThrottled(deltaSeconds);
+    if (!this.localAvatar) {
+      this._publishDebugMetrics(delta);
+      return;
+    }
 
     this._updateKeyboardMovement(deltaSeconds);
     this.movementSystem.update(deltaSeconds);
@@ -119,7 +128,12 @@ export abstract class BaseRoomScene extends Phaser.Scene {
 
     this.localAvatar.playAnimation(this._currentAvatarState());
     this.isoSystem.update();
-    this._updateHoverHighlight();
+    this._hoverElapsed += deltaSeconds;
+    if (this._hoverElapsed >= 0.05) {
+      this._hoverElapsed = 0;
+      this._updateHoverHighlight();
+    }
+    this._publishDebugMetrics(delta);
   }
 
   protected onLocalMove(_x: number, _y: number, _moving: boolean): void {
@@ -132,6 +146,10 @@ export abstract class BaseRoomScene extends Phaser.Scene {
 
   protected onTileInteract(_tileX: number, _tileY: number): boolean {
     return false;
+  }
+
+  protected collectDebugExtras(): Record<string, string | number | boolean | null> {
+    return {};
   }
 
   protected setLocalAvatarState(state: AvatarState | null): void {
@@ -200,6 +218,7 @@ export abstract class BaseRoomScene extends Phaser.Scene {
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key> | null;
 
+    this.input.keyboard?.on('keydown-F3', this._toggleDebugOverlay, this);
     this.cameraSystem.bindWheelZoom(this);
   }
 
@@ -340,6 +359,63 @@ export abstract class BaseRoomScene extends Phaser.Scene {
     this._drawNightOverlay(nightFactor);
   }
 
+  private _updateAtmosphereThrottled(deltaSeconds: number): void {
+    this._atmosphereElapsed += deltaSeconds;
+    if (this._lastNightFactor >= 0 && this._atmosphereElapsed < 0.2) return;
+    const elapsed = this._atmosphereElapsed;
+    this._atmosphereElapsed = 0;
+    this._updateAtmosphere(elapsed);
+  }
+
+  private _publishDebugMetrics(deltaMs: number): void {
+    this._lastFrameMs = deltaMs;
+    this._debugElapsed += deltaMs;
+    this._debugFrames += 1;
+
+    if (this._debugElapsed >= 500) {
+      this._debugFps = Math.round((this._debugFrames * 1000) / this._debugElapsed);
+      this._debugElapsed = 0;
+      this._debugFrames = 0;
+    }
+
+    const store = useGameStore.getState();
+    if (!store.showDebugOverlay || !this._streamer || !this._renderer || !this.worldMap || !this.isoSystem) return;
+
+    const stream = this._streamer.stats();
+    const renderer = this._renderer.stats();
+    const world = this.worldMap.stats();
+    const iso = this.isoSystem.stats();
+    const localTile = this.localAvatar
+      ? `${Math.round(this.movementSystem.posX)},${Math.round(this.movementSystem.posY)}`
+      : null;
+
+    const metrics: WorldDebugMetrics = {
+      fps: this._debugFps,
+      frameMs: Math.round(this._lastFrameMs * 10) / 10,
+      locationName: store.locationName,
+      routeHint: store.routeHint,
+      worldLoading: store.worldLoading,
+      activeSectors: stream.activeKeys.length,
+      loadedSectors: stream.loadedKeys.length,
+      inFlightSectors: stream.inFlightKeys.length,
+      renderedSectors: renderer.sectors,
+      worldSectors: world.sectors,
+      decorations: renderer.decorations,
+      lights: renderer.lights,
+      isoObjects: iso.objects,
+      isoDirty: iso.dirty,
+      localTile,
+      extra: this.collectDebugExtras(),
+    };
+
+    store.setWorldDebugMetrics(metrics);
+  }
+
+  private _toggleDebugOverlay(): void {
+    if (this._isDomTextInputFocused()) return;
+    useGameStore.getState().toggleDebugOverlay();
+  }
+
   private _drawNightOverlay(nightFactor: number): void {
     if (!this._nightOverlay) return;
     this._nightOverlay.clear();
@@ -368,8 +444,17 @@ export abstract class BaseRoomScene extends Phaser.Scene {
   }
 
   protected destroyWorld(): void {
+    this.input.keyboard?.off('keydown-F3', this._toggleDebugOverlay, this);
+    this._streamer?.destroy();
     this._renderer?.destroyAll();
-    useGameStore.getState().setWorldLoading(null);
-    useGameStore.getState().setLocalAvatarState('idle');
+    this.worldMap?.clear();
+    this.isoSystem?.clear();
+    this._hoverGraphics?.clear();
+    this._nightOverlay?.clear();
+    const store = useGameStore.getState();
+    store.setWorldLoading(null);
+    store.setTravelTargetName(null);
+    store.setWorldDebugMetrics(null);
+    store.setLocalAvatarState('idle');
   }
 }
