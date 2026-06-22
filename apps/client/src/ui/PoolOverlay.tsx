@@ -10,6 +10,7 @@ import {
 import { eventBus } from '../eventBus';
 import { useGameStore } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';
+import { predictAim } from './poolAim';
 
 interface PoolOverlayProps {
   isCompact: boolean;
@@ -31,6 +32,8 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
   const ballsRef = useRef<PoolBall[]>(defaultPoolBalls());
   const processedShotRef = useRef<string | null>(null);
   const syncingShotRef = useRef<string | null>(null);
+  const strikeRef = useRef<{ start: number; angle: number; power: number } | null>(null);
+  const strikeRafRef = useRef<number | null>(null);
   const poolStatus = useGameStore((s) => s.poolStatus);
   const setShowPoolOverlay = useGameStore((s) => s.setShowPoolOverlay);
   const poolMessage = useGameStore((s) => s.poolMessage);
@@ -97,6 +100,7 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
 
   useEffect(() => () => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    if (strikeRafRef.current !== null) cancelAnimationFrame(strikeRafRef.current);
   }, []);
 
   const panelStyle: React.CSSProperties = {
@@ -377,6 +381,9 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
   }
 
   function applyShot(shot: PoolShot): void {
+    if (strikeRafRef.current !== null) cancelAnimationFrame(strikeRafRef.current);
+    strikeRafRef.current = null;
+    strikeRef.current = null;
     const next = ballsRef.current.map((ball) => ({ ...ball, vx: 0, vy: 0 }));
     const cue = next.find((ball) => ball.id === 'cue');
     if (!cue || cue.pocketed) return;
@@ -439,12 +446,36 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
     if (!canShoot) return;
     const shot = shotFromAim();
     if (!shot) return;
+    triggerCueStrike(shot.angle, shot.power);
     setAimPoint(null);
     eventBus.emit('pool-shot', {
       angle: shot.angle,
       power: shot.power,
       spin: shot.spin,
     });
+  }
+
+  // Lunge the cue stick into the ball for tactile feedback while we wait for the
+  // server to echo the authoritative shot (which then starts the real simulation).
+  function triggerCueStrike(angle: number, power: number): void {
+    if (strikeRafRef.current !== null) cancelAnimationFrame(strikeRafRef.current);
+    strikeRef.current = { start: performance.now(), angle, power };
+    const STRIKE_MS = 220;
+    const animate = (now: number) => {
+      if (!strikeRef.current) {
+        strikeRafRef.current = null;
+        return;
+      }
+      draw();
+      if (now - strikeRef.current.start >= STRIKE_MS) {
+        strikeRef.current = null;
+        strikeRafRef.current = null;
+        draw();
+        return;
+      }
+      strikeRafRef.current = requestAnimationFrame(animate);
+    };
+    strikeRafRef.current = requestAnimationFrame(animate);
   }
 
   function shotFromAim(): { angle: number; power: number; spin: number } | null {
@@ -495,57 +526,64 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
       ctx.fill();
     }
 
-    if (canShoot) {
-      const cue = sourceBalls.find((ball) => ball.id === 'cue' && !ball.pocketed);
-      if (cue) {
-        const cuePoint = ballToCanvas(cue);
+    const striking = strikeRef.current;
+    const cue = sourceBalls.find((ball) => ball.id === 'cue' && !ball.pocketed);
+    if (cue && (canShoot || striking)) {
+      const cuePoint = ballToCanvas(cue);
+      let angle: number;
+      if (striking) {
+        angle = striking.angle;
+      } else {
         const target = aimPoint ?? { x: Math.min(TABLE_W - 64, cuePoint.x + 150), y: cuePoint.y };
-        const dx = target.x - cuePoint.x;
-        const dy = target.y - cuePoint.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist > 10) {
-          const angle = Math.atan2(dy, dx);
-          const predicted = predictCuePath(sourceBalls, {
-            angle,
-            power: clamp(powerSetting, 0.18, 1),
-            spin: clamp(spinSetting, -1, 1),
-          });
+        angle = Math.atan2(target.y - cuePoint.y, target.x - cuePoint.x);
+      }
 
-          ctx.strokeStyle = 'rgba(255,244,208,0.34)';
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([4, 8]);
-          ctx.beginPath();
-          ctx.moveTo(cuePoint.x, cuePoint.y);
-          ctx.lineTo(
-            cuePoint.x + Math.cos(angle) * 720,
-            cuePoint.y + Math.sin(angle) * 720,
-          );
-          ctx.stroke();
+      // Clean geometric aim guide: straight line to the first contact (ball or
+      // cushion), a ghost ball at impact, and the struck ball's resulting line.
+      if (!striking) {
+        const guide = predictAim(sourceBalls, angle, { tableW: TABLE_W, tableH: TABLE_H, ballR: BALL_R });
+        if (guide) {
           ctx.setLineDash([]);
+          ctx.strokeStyle = 'rgba(255,244,208,0.85)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(guide.cueStart.x, guide.cueStart.y);
+          ctx.lineTo(guide.cueEnd.x, guide.cueEnd.y);
+          ctx.stroke();
 
-          if (predicted.length > 1) {
-            ctx.strokeStyle = spinSetting === 0 ? 'rgba(136,255,187,0.88)' : 'rgba(177,151,252,0.9)';
-            ctx.lineWidth = 3;
+          if (guide.ghost) {
+            ctx.strokeStyle = 'rgba(255,255,255,0.72)';
+            ctx.lineWidth = 1.5;
             ctx.beginPath();
-            ctx.moveTo(predicted[0].x, predicted[0].y);
-            for (const point of predicted.slice(1)) ctx.lineTo(point.x, point.y);
+            ctx.arc(guide.ghost.x, guide.ghost.y, 10, 0, Math.PI * 2);
             ctx.stroke();
-            const last = predicted[predicted.length - 1];
-            ctx.fillStyle = 'rgba(255,244,208,0.72)';
+          }
+          if (guide.targetStart && guide.targetEnd) {
+            ctx.strokeStyle = 'rgba(136,255,187,0.92)';
+            ctx.lineWidth = 2.5;
             ctx.beginPath();
-            ctx.arc(last.x, last.y, 5, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.moveTo(guide.targetStart.x, guide.targetStart.y);
+            ctx.lineTo(guide.targetEnd.x, guide.targetEnd.y);
+            ctx.stroke();
           }
         }
-
-        ctx.strokeStyle = 'rgba(255,244,208,0.9)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([]);
-        ctx.beginPath();
-        ctx.moveTo(cuePoint.x, cuePoint.y);
-        ctx.lineTo(target.x, target.y);
-        ctx.stroke();
       }
+
+      // Cue stick: rests behind the ball (pulled back with power) and lunges in
+      // when the shot fires.
+      const restPull = 12 + clamp(powerSetting, 0.18, 1) * 42;
+      let pull = restPull;
+      if (striking) {
+        const p = clamp((performance.now() - striking.start) / 220, 0, 1);
+        const peak = restPull + 22;
+        if (p < 0.3) {
+          pull = restPull + (peak - restPull) * (p / 0.3);
+        } else {
+          const f = (p - 0.3) / 0.7;
+          pull = peak + (-6 - peak) * (f * f);
+        }
+      }
+      drawCueStick(ctx, cuePoint, angle, pull);
     }
 
     for (const ball of sourceBalls) {
@@ -643,32 +681,48 @@ function stepPhysics(balls: PoolBall[], dt: number): PoolBall[] {
   return next;
 }
 
-function predictCuePath(
-  balls: PoolBall[],
-  shot: { angle: number; power: number; spin: number },
-): Array<{ x: number; y: number }> {
-  let next: PoolBall[] = balls.map((ball) => ({ ...ball, vx: 0, vy: 0, spin: 0 }));
-  const cue = next.find((ball) => ball.id === 'cue' && !ball.pocketed);
-  if (!cue) return [];
+function drawCueStick(
+  ctx: CanvasRenderingContext2D,
+  cuePoint: { x: number; y: number },
+  angle: number,
+  pull: number,
+): void {
+  const ballR = 10;
+  const backX = -Math.cos(angle);
+  const backY = -Math.sin(angle);
+  const tipX = cuePoint.x + backX * (ballR + pull);
+  const tipY = cuePoint.y + backY * (ballR + pull);
+  const shaftLen = 232;
+  const buttX = tipX + backX * shaftLen;
+  const buttY = tipY + backY * shaftLen;
 
-  cue.vx = Math.cos(shot.angle) * shot.power * SHOT_IMPULSE;
-  cue.vy = Math.sin(shot.angle) * shot.power * SHOT_IMPULSE;
-  cue.spin = shot.spin * shot.power;
+  ctx.save();
+  ctx.lineCap = 'round';
 
-  const points: Array<{ x: number; y: number }> = [ballToCanvasPoint(cue)];
-  for (let i = 0; i < 180; i++) {
-    next = stepPhysics(next, 1 / 60);
-    const projectedCue = next.find((ball) => ball.id === 'cue');
-    if (!projectedCue || projectedCue.pocketed) break;
-    if (i % 3 === 0) points.push(ballToCanvasPoint(projectedCue));
-    if (!next.some((ball) => !ball.pocketed && Math.hypot(ball.vx, ball.vy) > STOP_SPEED)) break;
-  }
+  // Wooden shaft, tapering darker toward the butt.
+  const grad = ctx.createLinearGradient(tipX, tipY, buttX, buttY);
+  grad.addColorStop(0, '#d9a86a');
+  grad.addColorStop(1, '#6b4a2a');
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(buttX, buttY);
+  ctx.stroke();
 
-  return points;
-}
+  // White ferrule + blue tip.
+  ctx.strokeStyle = '#efe9d6';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(tipX + backX * 14, tipY + backY * 14);
+  ctx.stroke();
 
-function ballToCanvasPoint(ball: PoolBall): { x: number; y: number } {
-  return { x: ball.x * TABLE_W, y: ball.y * TABLE_H };
+  ctx.fillStyle = '#2f7fbf';
+  ctx.beginPath();
+  ctx.arc(tipX, tipY, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function collide(a: PoolBall, b: PoolBall): void {

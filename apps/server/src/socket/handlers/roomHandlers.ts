@@ -798,7 +798,19 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         socket.emit('error', { code, message, requestId });
       };
 
-      if (!hitSocketRate(socket, 'petal', 8, 10_000)) return;
+      const petalRate = socketRateLimiter.hit(socketRateKey(socket, 'petal'), 16, 10_000);
+      if (!petalRate.allowed) {
+        // Emit WITH the requestId so the client clears the exact pending collect
+        // instead of guessing "the latest one" and orphaning the real failure.
+        emitPetalError('PETAL_RATE_LIMIT', 'Troppi petali troppo in fretta, rallenta un attimo');
+        logWarn('socket.rate_limited', {
+          bucket: 'petal',
+          userId,
+          socketId: socket.id,
+          retryAfterMs: petalRate.retryAfterMs,
+        });
+        return;
+      }
       if (action !== 'petal-collect') {
         emitPetalError('UNKNOWN_INTERACTION', 'Azione petali sconosciuta');
         return;

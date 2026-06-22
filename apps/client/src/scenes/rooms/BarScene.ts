@@ -174,11 +174,16 @@ interface PetalBloom {
 interface PendingPetalCollect {
   position: Position;
   amount: number;
+  requestedAt: number;
 }
 
 const PETAL_COLLECT_RADIUS_TILES = 2.75;
 const PETAL_AUTO_COLLECT_RADIUS_TILES = 1.35;
 const PETAL_AUTO_COLLECT_CHECK_MS = 32;
+// Backstop: if a collect request never gets a server reply (lost packet, server
+// restart, latency spike) drop the optimistic credit so the flower point can be
+// collected again instead of being blocked forever.
+const PETAL_PENDING_TIMEOUT_MS = 6000;
 const PETAL_SPAWN_TICK_MS = 3000;
 const VOICE_MUTE_STORAGE_KEY = 'social-square:voice-muted-users';
 
@@ -339,6 +344,7 @@ export class BarScene extends BaseRoomScene {
     this._petalCollectElapsed += delta;
     if (this._petalCollectElapsed >= PETAL_AUTO_COLLECT_CHECK_MS) {
       this._petalCollectElapsed = 0;
+      this._sweepStalePetalCollects();
       this._collectNearbyPetals();
     }
   }
@@ -557,6 +563,17 @@ export class BarScene extends BaseRoomScene {
     return bloom;
   }
 
+  private _sweepStalePetalCollects(): void {
+    if (this._pendingPetalCollects.size === 0) return;
+    const now = Date.now();
+    for (const [key, pending] of this._pendingPetalCollects) {
+      if (now - pending.requestedAt >= PETAL_PENDING_TIMEOUT_MS) {
+        this._pendingPetalCollects.delete(key);
+        this._removeOptimisticPetalCredit(pending);
+      }
+    }
+  }
+
   private _collectNearbyPetals(): void {
     const local = this._localPosition();
     if (!local || this._petalBlooms.length === 0) return;
@@ -583,6 +600,7 @@ export class BarScene extends BaseRoomScene {
     this._pendingPetalCollects.set(key, {
       position: { ...bloom.position },
       amount,
+      requestedAt: Date.now(),
     });
     this._removePetalBloom(bloom);
     if (amount > 0) {
@@ -1459,9 +1477,6 @@ export class BarScene extends BaseRoomScene {
           this._forgetPendingPetalCollect(requestId);
         } else if (requestId) {
           this._rollbackPendingPetalCollect(requestId, message);
-          noticeHandled = true;
-        } else if (code === 'RATE_LIMIT' && this._pendingPetalCollects.size > 0) {
-          this._rollbackLatestPendingPetalCollect(message);
           noticeHandled = true;
         } else if ((code === 'INVALID_PETAL' || code === 'TOO_FAR') && this._pendingPetalCollects.size > 0) {
           this._rollbackLatestPendingPetalCollect(message);
