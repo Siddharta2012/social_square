@@ -130,16 +130,15 @@ export function setupNetwork(this: any): void {
       const localizedMessage = errorText(code, message);
       console.error(`[Network] ${code}: ${message}`);
       let noticeHandled = false;
-      if (requestId && code === 'PETAL_COOLDOWN') {
-        this._forgetPendingPetalCollect(requestId);
-      } else if (requestId) {
+      if (requestId) {
         this._rollbackPendingPetalCollect(requestId, localizedMessage);
         noticeHandled = true;
       } else if ((code === 'INVALID_PETAL' || code === 'TOO_FAR') && this._pendingPetalCollects.size > 0) {
         this._rollbackLatestPendingPetalCollect(localizedMessage);
         noticeHandled = true;
       } else if (code === 'PETAL_COOLDOWN') {
-        this._forgetLatestPendingPetalCollect();
+        this._rollbackLatestPendingPetalCollect(localizedMessage);
+        noticeHandled = true;
       }
       if (localizedMessage) {
         const store = useGameStore.getState();

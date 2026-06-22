@@ -88,7 +88,6 @@ export async function handlePetalInteraction(
     requestId,
   });
   socket.emit('account-updated', {
-    petals: accountUser.petals,
     stats: { ...accountUser.stats },
     progress: progressUpdate?.progress,
   });

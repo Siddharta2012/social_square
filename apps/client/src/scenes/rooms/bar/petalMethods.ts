@@ -24,6 +24,7 @@ export interface PendingPetalCollect {
   position: Position;
   amount: number;
   requestedAt: number;
+  serverCheckTimedOut?: boolean;
 }
 
 export const PETAL_COLLECT_RADIUS_TILES = 2.75;
@@ -103,10 +104,9 @@ export function createPetalBloom(this: any, position: Position, amount: number):
 export function sweepStalePetalCollects(this: any): void {
   if (this._pendingPetalCollects.size === 0) return;
   const now = Date.now();
-  for (const [key, pending] of this._pendingPetalCollects) {
-    if (now - pending.requestedAt >= PETAL_PENDING_TIMEOUT_MS) {
-      this._pendingPetalCollects.delete(key);
-      this._removeOptimisticPetalCredit(pending);
+  for (const pending of this._pendingPetalCollects.values()) {
+    if (!pending.serverCheckTimedOut && now - pending.requestedAt >= PETAL_PENDING_TIMEOUT_MS) {
+      pending.serverCheckTimedOut = true;
     }
   }
 }
@@ -173,7 +173,7 @@ export function confirmPetalCollected(
     this._spawnPetalCollectBurst(position, amount);
     this._playPetalCollectSound();
   }
-  this._applyServerPetals(petals);
+  this._acceptPetalServerTotal(petals);
   this._showNotice(t('bar.notice.petalsGained', { amount }));
   this._syncLocalContext();
 }
@@ -229,6 +229,12 @@ export function removeOptimisticPetalCredit(this: any, pending: PendingPetalColl
 
 export function applyServerPetals(this: any, petals: number): void {
   useGameStore.getState().setPetals(petals + this._pendingPetalValue());
+}
+
+export function acceptPetalServerTotal(this: any, petals: number): void {
+  const store = useGameStore.getState();
+  const serverWithLocalPending = petals + this._pendingPetalValue();
+  store.setPetals(Math.max(store.petals, serverWithLocalPending));
 }
 
 export function pendingPetalValue(this: any): number {

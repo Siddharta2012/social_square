@@ -377,6 +377,10 @@ export class BarScene extends BaseRoomScene {
     petalMethods.applyServerPetals.call(this, petals);
   }
 
+  private _acceptPetalServerTotal(petals: number): void {
+    petalMethods.acceptPetalServerTotal.call(this, petals);
+  }
+
   private _pendingPetalValue(): number {
     return petalMethods.pendingPetalValue.call(this);
   }
