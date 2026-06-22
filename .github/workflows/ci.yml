@@ -22,7 +22,9 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Must match package.json engines (node >=22.13) and the Railway deploy;
+          # Node 20 fails because the toolchain (pnpm 11.8 / node:sqlite) needs 22+.
+          node-version: 22
           cache: pnpm
 
       - name: Install
