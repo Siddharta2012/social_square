@@ -1,11 +1,13 @@
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import pg from 'pg';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDir = path.join(__dirname, 'migrations');
+const requireFromServer = createRequire(path.join(__dirname, '../apps/server/package.json'));
+const pg = requireFromServer('pg');
 const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
