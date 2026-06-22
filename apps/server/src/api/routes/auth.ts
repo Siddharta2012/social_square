@@ -148,14 +148,15 @@ const loginHandler: RequestHandler = async (req, res) => {
 };
 
 const googleStartHandler: RequestHandler = (req, res) => {
+  const clientUrl = clientUrlFromRequest(req);
   if (!GOOGLE_ENABLED) {
-    res.redirect(`${CLIENT_URL}?authError=${encodeURIComponent('Google non configurato')}`);
+    res.redirect(`${clientUrl}?authError=${encodeURIComponent('Google non configurato')}`);
     return;
   }
 
   const state = jwt.sign({
     createdAt: Date.now(),
-    clientUrl: clientUrlFromRequest(req),
+    clientUrl,
   }, JWT_SECRET, { expiresIn: '10m' });
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID!,

@@ -62,15 +62,22 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
-  const [config, setConfig] = useState<AuthConfig>({ googleEnabled: true, devPasswordLogin: false });
+  const [config, setConfig] = useState<AuthConfig>({ googleEnabled: false, devPasswordLogin: false });
+  const [configLoading, setConfigLoading] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    void fetchAuthConfig().then(setConfig);
+    void fetchAuthConfig()
+      .then(setConfig)
+      .finally(() => setConfigLoading(false));
     inputRef.current?.focus();
   }, []);
 
   const handleGoogle = () => {
+    if (!config.googleEnabled) {
+      setError('Google OAuth non configurato nel server');
+      return;
+    }
     setError('');
     setLoading(true);
     setLoadingMsg('Apertura Google...');
@@ -134,7 +141,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
 
         <button
           type="button"
-          disabled={loading || !config.googleEnabled}
+          disabled={loading || configLoading || !config.googleEnabled}
           onClick={handleGoogle}
           style={{
             ...buttonStyle,
@@ -142,10 +149,10 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess }) => {
             background: config.googleEnabled ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.18)',
             border: '1px solid rgba(255,255,255,0.7)',
             color: '#1f2340',
-            cursor: loading || !config.googleEnabled ? 'default' : 'pointer',
+            cursor: loading || configLoading || !config.googleEnabled ? 'default' : 'pointer',
           }}
         >
-          {loading ? loadingMsg : 'Continua con Google'}
+          {loading ? loadingMsg : configLoading ? 'Verifico Google...' : 'Continua con Google'}
         </button>
 
         {!config.googleEnabled && (
