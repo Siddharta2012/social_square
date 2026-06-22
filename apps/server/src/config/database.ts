@@ -1,7 +1,9 @@
 import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
 import { env } from './env';
 
-const READY_TIMEOUT_MS = 1500;
+// Generous enough for managed-Postgres cold starts (Railway etc.); 1.5s was too
+// aggressive and made the first connection / readiness probe flaky on deploy.
+const CONNECTION_TIMEOUT_MS = 8000;
 
 let pool: Pool | null = null;
 
@@ -9,7 +11,7 @@ function databasePool(): Pool | null {
   if (!env.DATABASE_URL) return null;
   pool ??= new Pool({
     connectionString: env.DATABASE_URL,
-    connectionTimeoutMillis: READY_TIMEOUT_MS,
+    connectionTimeoutMillis: CONNECTION_TIMEOUT_MS,
     idleTimeoutMillis: 10_000,
     max: 2,
   });

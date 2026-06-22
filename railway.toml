@@ -2,8 +2,12 @@
 [build]
 buildCommand = "pnpm install && pnpm --filter shared build && pnpm --filter client build && pnpm --filter server build"
 
+# Deploy gate checks LIVENESS (/api/health, always 200 when the process serves
+# HTTP), not deep readiness (/api/ready depends on DB+Redis and can 503 during a
+# cold start, which would fail the whole deploy). Use /api/ready for monitoring,
+# not as the deploy gate. Timeout is generous so migrations + cold start fit.
 [deploy]
 startCommand = "node scripts/migrate.mjs && node apps/server/dist/index.js"
 restartPolicyType = "on_failure"
-healthcheckPath = "/api/ready"
-healthcheckTimeout = 30
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
