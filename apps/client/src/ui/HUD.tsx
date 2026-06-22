@@ -18,6 +18,8 @@ import { eventBus } from '../eventBus';
 import { fastTravelLocations } from '../world/locations';
 import { fetchAccountProfile } from '../api/account';
 
+type MobilePanel = 'actions' | 'chat' | null;
+
 export const HUD: React.FC = () => {
   const showAuthForm = useGameStore((s) => s.showAuthForm);
   const setShowAuthForm = useGameStore((s) => s.setShowAuthForm);
@@ -58,6 +60,8 @@ export const HUD: React.FC = () => {
   const [jukeboxUrlDraft, setJukeboxUrlDraft] = useState('');
   const [jukeboxUrlError, setJukeboxUrlError] = useState('');
   const [clockNow, setClockNow] = useState(Date.now());
+  const [isCompactHud, setIsCompactHud] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
 
   const inRoom = currentRoomId !== null;
   const travelOptions = fastTravelLocations();
@@ -126,6 +130,18 @@ export const HUD: React.FC = () => {
     const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [jukeboxActive]);
+
+  useEffect(() => {
+    const updateLayoutMode = () => {
+      const compact = window.matchMedia('(max-width: 760px), (pointer: coarse)').matches;
+      setIsCompactHud(compact);
+      if (!compact) setMobilePanel(null);
+    };
+
+    updateLayoutMode();
+    window.addEventListener('resize', updateLayoutMode);
+    return () => window.removeEventListener('resize', updateLayoutMode);
+  }, []);
 
   const handleAuthSuccess = (data: {
     userId: string;
@@ -226,6 +242,32 @@ export const HUD: React.FC = () => {
     cursor: 'default',
   };
 
+  const mobileButtonStyle: React.CSSProperties = {
+    ...smallButtonStyle,
+    flex: 1,
+    minWidth: 0,
+    height: '42px',
+    padding: '0 6px',
+    fontSize: '10px',
+    borderRadius: '5px',
+  };
+
+  const mobileSheetStyle: React.CSSProperties = {
+    position: 'absolute',
+    left: '8px',
+    right: '8px',
+    bottom: '60px',
+    zIndex: 132,
+    maxHeight: '46vh',
+    overflowY: 'auto',
+    background: 'rgba(8,10,24,0.94)',
+    border: '1px solid rgba(150,150,255,0.34)',
+    borderRadius: '8px',
+    padding: '10px',
+    pointerEvents: 'auto',
+    boxShadow: '0 14px 34px rgba(0,0,0,0.42)',
+  };
+
   return (
     <div style={{
       position: 'absolute', top: 0, left: 0,
@@ -234,43 +276,70 @@ export const HUD: React.FC = () => {
     }}>
       {/* Top bar */}
       <div style={{
-        position: 'absolute', top: 0, left: 0, right: 0,
-        padding: '8px 16px',
+        position: 'absolute',
+        top: isCompactHud ? '8px' : 0,
+        left: isCompactHud ? '8px' : 0,
+        right: isCompactHud ? '8px' : 0,
+        padding: isCompactHud ? '7px 10px' : '8px 16px',
         background: 'rgba(10,10,30,0.85)',
         backdropFilter: 'blur(4px)',
         color: '#e0e0ff',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        fontSize: '12px',
+        gap: isCompactHud ? '8px' : undefined,
+        fontSize: isCompactHud ? '11px' : '12px',
         borderBottom: '1px solid rgba(100,100,200,0.2)',
+        borderRadius: isCompactHud ? '7px' : 0,
         pointerEvents: 'auto',
       }}>
-        <span style={{ fontWeight: 'bold', color: '#8888ff', letterSpacing: '0.05em' }}>
+        <span style={{
+          fontWeight: 'bold',
+          color: '#8888ff',
+          letterSpacing: '0.05em',
+          display: isCompactHud ? 'none' : 'inline',
+        }}>
           Social Square
         </span>
 
         {inRoom && (locationName || roomName) && (
           <div style={{
-            position: 'absolute',
-            left: '50%',
-            transform: 'translateX(-50%)',
+            position: isCompactHud ? 'static' : 'absolute',
+            left: isCompactHud ? undefined : '50%',
+            transform: isCompactHud ? undefined : 'translateX(-50%)',
             display: 'flex',
             flexDirection: 'column',
-            alignItems: 'center',
+            alignItems: isCompactHud ? 'flex-start' : 'center',
             gap: '1px',
+            minWidth: 0,
+            flex: isCompactHud ? 1 : undefined,
             pointerEvents: 'none',
           }}>
-            <span style={{ color: '#fff4d0', fontSize: '13px', fontWeight: 700 }}>
+            <span style={{
+              color: '#fff4d0',
+              fontSize: isCompactHud ? '12px' : '13px',
+              fontWeight: 700,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              maxWidth: isCompactHud ? '52vw' : undefined,
+            }}>
               {locationName ?? roomName}
             </span>
-            <span style={{ color: routeHint ? '#88ffbb' : '#7777aa', fontSize: '9px' }}>
+            <span style={{
+              color: routeHint ? '#88ffbb' : '#7777aa',
+              fontSize: '9px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              maxWidth: isCompactHud ? '52vw' : undefined,
+            }}>
               {routeHint ?? 'location'}
             </span>
           </div>
         )}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: isCompactHud ? '6px' : '12px' }}>
           {inRoom && (
             <span style={{
               color: '#ffe14d',
@@ -283,7 +352,7 @@ export const HUD: React.FC = () => {
               Petali {petals}
             </span>
           )}
-          {inRoom && (
+          {inRoom && !isCompactHud && (
             <span style={{ color: '#8888aa', fontSize: '11px' }}>
               {usersInRoom} {usersInRoom === 1 ? 'utente' : 'utenti'}
             </span>
@@ -299,13 +368,13 @@ export const HUD: React.FC = () => {
               background: isConnected ? '#44ff88' : inRoom ? '#ff4444' : '#333355',
               boxShadow: isConnected ? '0 0 6px #44ff88aa' : 'none',
             }} />
-            {isConnected ? (username ?? 'connesso') : inRoom ? 'disconnesso' : ''}
+            {isCompactHud ? '' : isConnected ? (username ?? 'connesso') : inRoom ? 'disconnesso' : ''}
           </span>
         </div>
       </div>
 
       {/* Bottom bar — solo in stanza */}
-      {inRoom && (
+      {inRoom && !isCompactHud && (
         <div style={{
           position: 'absolute', bottom: 0, left: 0, right: 0,
           padding: '8px 16px',
@@ -438,6 +507,267 @@ export const HUD: React.FC = () => {
         </div>
       )}
 
+      {inRoom && isCompactHud && (
+        <>
+          <div style={{
+            position: 'absolute',
+            left: '8px',
+            right: '8px',
+            bottom: '8px',
+            zIndex: 131,
+            display: 'flex',
+            gap: '6px',
+            pointerEvents: 'auto',
+          }}>
+            <button
+              style={{
+                ...mobileButtonStyle,
+                color: mobilePanel === 'actions' ? '#ffe14d' : '#aaaaff',
+                borderColor: mobilePanel === 'actions' ? 'rgba(255,225,77,0.55)' : 'rgba(150,150,255,0.35)',
+              }}
+              onClick={() => setMobilePanel(mobilePanel === 'actions' ? null : 'actions')}
+            >
+              Azioni
+            </button>
+            <button
+              style={{
+                ...mobileButtonStyle,
+                color: mobilePanel === 'chat' ? '#ffe14d' : '#aaaaff',
+                borderColor: mobilePanel === 'chat' ? 'rgba(255,225,77,0.55)' : 'rgba(150,150,255,0.35)',
+              }}
+              onClick={() => setMobilePanel(mobilePanel === 'chat' ? null : 'chat')}
+            >
+              Chat
+            </button>
+            <button
+              style={mobileButtonStyle}
+              onClick={() => {
+                setMobilePanel(null);
+                setShowWorldMap(!showWorldMap);
+              }}
+            >
+              Mappa
+            </button>
+            <button
+              style={mobileButtonStyle}
+              onClick={() => {
+                setMobilePanel(null);
+                setShowAudioSettings(true);
+              }}
+            >
+              Audio
+            </button>
+          </div>
+
+          {mobilePanel === 'actions' && (
+            <div style={mobileSheetStyle}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '9px',
+              }}>
+                <span style={{ color: '#fff4d0', fontSize: '12px', fontWeight: 700 }}>
+                  Azioni
+                </span>
+                <button style={smallButtonStyle} onClick={() => setMobilePanel(null)}>
+                  Chiudi
+                </button>
+              </div>
+
+              {heldItem && (
+                <button
+                  style={{
+                    ...smallButtonStyle,
+                    width: '100%',
+                    height: '40px',
+                    marginBottom: '8px',
+                    color: '#ffe14d',
+                    borderColor: 'rgba(255,225,77,0.48)',
+                  }}
+                  onClick={() => eventBus.emit('consume-held-item')}
+                >
+                  Usa {heldItem === 'beer' ? 'birra' : 'pretzel'}
+                </button>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', marginBottom: '8px' }}>
+                <button style={smallButtonStyle} onClick={() => emitEmote('wave')}>Saluta</button>
+                <button style={smallButtonStyle} onClick={() => emitEmote('dance')}>Balla</button>
+                <button style={smallButtonStyle} onClick={() => emitEmote('clap')}>Applauso</button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', marginBottom: '8px' }}>
+                <button
+                  style={{ ...smallButtonStyle, ...(!canUseJukebox || jukeboxActive ? disabledButtonStyle : {}) }}
+                  disabled={!canUseJukebox || jukeboxActive}
+                  onClick={() => eventBus.emit('jukebox-toggle')}
+                >
+                  Jukebox
+                </button>
+                <button
+                  style={{ ...smallButtonStyle, ...(!canUseJukebox || jukeboxActive ? disabledButtonStyle : {}) }}
+                  disabled={!canUseJukebox || jukeboxActive}
+                  onClick={() => eventBus.emit('jukebox-next')}
+                >
+                  Next
+                </button>
+                <button
+                  style={{ ...smallButtonStyle, ...(!canUseJukebox || jukeboxActive ? disabledButtonStyle : {}) }}
+                  disabled={!canUseJukebox || jukeboxActive}
+                  onClick={() => {
+                    setJukeboxUrlError('');
+                    setMobilePanel(null);
+                    setShowJukeboxLink(!showJukeboxLink);
+                  }}
+                >
+                  Link
+                </button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: localAvatarState === 'sit' ? '1fr 1fr' : '1fr', gap: '6px' }}>
+                <button
+                  style={{
+                    ...smallButtonStyle,
+                    height: '36px',
+                    color: waiterAwaitingOrder ? '#ffe14d' : '#aaaaff',
+                    borderColor: waiterAwaitingOrder ? 'rgba(255,225,77,0.55)' : 'rgba(150,150,255,0.35)',
+                    opacity: waiterButtonEnabled ? 1 : 0.44,
+                    cursor: waiterButtonEnabled ? 'pointer' : 'default',
+                  }}
+                  disabled={!waiterButtonEnabled}
+                  onClick={() => {
+                    if (waiterCanCall && canUseWaiter) eventBus.emit('waiter-call');
+                  }}
+                >
+                  {waiterLabel}
+                </button>
+                {localAvatarState === 'sit' && (
+                  <button style={{ ...smallButtonStyle, height: '36px' }} onClick={() => eventBus.emit('leave-seat')}>
+                    Alzati
+                  </button>
+                )}
+              </div>
+
+              {jukeboxStatus?.playing && (
+                <div style={{
+                  marginTop: '8px',
+                  color: '#aaaadd',
+                  fontSize: '10px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {jukeboxStatus.title}{jukeboxTimeLeft ? ` ${jukeboxTimeLeft}` : ''}
+                </div>
+              )}
+
+              <button
+                onClick={handleExit}
+                style={{
+                  ...smallButtonStyle,
+                  width: '100%',
+                  height: '36px',
+                  marginTop: '9px',
+                  color: '#ff8888',
+                  borderColor: 'rgba(255,80,80,0.42)',
+                  background: 'rgba(255,80,80,0.14)',
+                }}
+              >
+                Esci
+              </button>
+            </div>
+          )}
+
+          {mobilePanel === 'chat' && (
+            <div style={mobileSheetStyle}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '8px',
+              }}>
+                <span style={{ color: '#fff4d0', fontSize: '12px', fontWeight: 700 }}>
+                  Chat
+                </span>
+                <button style={smallButtonStyle} onClick={() => setMobilePanel(null)}>
+                  Chiudi
+                </button>
+              </div>
+
+              <div style={{
+                maxHeight: '24vh',
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '5px',
+                marginBottom: '8px',
+              }}>
+                {chatMessages.length === 0 && (
+                  <span style={{ color: '#7777aa', fontSize: '11px' }}>Nessun messaggio</span>
+                )}
+                {chatMessages.slice(-8).map((message) => (
+                  <div key={message.id} style={{
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(150,150,255,0.16)',
+                    borderRadius: '5px',
+                    padding: '5px 7px',
+                    color: '#e0e0ff',
+                    fontSize: '11px',
+                    lineHeight: 1.35,
+                  }}>
+                    <span style={{ color: '#88ffbb', fontWeight: 'bold' }}>{message.username}</span>
+                    <span style={{ color: '#7777aa' }}>:</span>{' '}
+                    <span>{message.text}</span>
+                  </div>
+                ))}
+              </div>
+
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  sendChat();
+                }}
+                style={{ display: 'flex', gap: '6px' }}
+              >
+                <input
+                  value={chatDraft}
+                  maxLength={CHAT_MAX_LENGTH}
+                  onChange={(event) => setChatDraft(event.target.value)}
+                  placeholder="Scrivi..."
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    height: '38px',
+                    boxSizing: 'border-box',
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(150,150,255,0.32)',
+                    borderRadius: '5px',
+                    color: '#e0e0ff',
+                    fontFamily: 'monospace',
+                    fontSize: '13px',
+                    padding: '0 10px',
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={!normalizeChatText(chatDraft)}
+                  style={{
+                    ...smallButtonStyle,
+                    height: '38px',
+                    opacity: normalizeChatText(chatDraft) ? 1 : 0.48,
+                    cursor: normalizeChatText(chatDraft) ? 'pointer' : 'default',
+                  }}
+                >
+                  Invia
+                </button>
+              </form>
+            </div>
+          )}
+        </>
+      )}
+
       {inRoom && showWorldMap && (
         <div style={{
           position: 'absolute',
@@ -509,10 +839,11 @@ export const HUD: React.FC = () => {
           }}
           style={{
             position: 'absolute',
-            right: '16px',
-            bottom: '52px',
+            right: isCompactHud ? '8px' : '16px',
+            left: isCompactHud ? '8px' : undefined,
+            bottom: isCompactHud ? '112px' : '52px',
             zIndex: 126,
-            width: 'min(360px, calc(100vw - 32px))',
+            width: isCompactHud ? 'auto' : 'min(360px, calc(100vw - 32px))',
             background: 'rgba(10,10,30,0.94)',
             border: '1px solid rgba(150,150,255,0.35)',
             borderRadius: '6px',
@@ -578,8 +909,9 @@ export const HUD: React.FC = () => {
       {inRoom && userActionMenu && (
         <div style={{
           position: 'absolute',
-          right: '16px',
-          top: '54px',
+          right: isCompactHud ? '8px' : '16px',
+          left: isCompactHud ? '8px' : undefined,
+          top: isCompactHud ? '58px' : '54px',
           zIndex: 145,
           background: 'rgba(10,10,30,0.94)',
           border: '1px solid rgba(150,150,255,0.32)',
@@ -609,7 +941,7 @@ export const HUD: React.FC = () => {
       {/* Held-item prompt — centered above the bottom bar */}
       {inRoom && heldItem && (
         <div style={{
-          position: 'absolute', bottom: '52px', left: '50%',
+          position: 'absolute', bottom: isCompactHud ? '64px' : '52px', left: '50%',
           transform: 'translateX(-50%)',
           background: 'rgba(10,10,30,0.9)',
           border: '1px solid rgba(255,225,77,0.5)',
@@ -623,21 +955,27 @@ export const HUD: React.FC = () => {
           display: 'flex', alignItems: 'center', gap: '8px',
         }}>
           <span style={{ fontSize: '16px' }}>{heldItem === 'beer' ? '🍺' : '🥨'}</span>
-          Premi
-          <kbd style={{
-            background: 'rgba(255,225,77,0.18)',
-            border: '1px solid rgba(255,225,77,0.6)',
-            borderRadius: '3px',
-            padding: '1px 7px',
-            color: '#ffe14d',
-            fontWeight: 'bold',
-          }}>B</kbd>
-          per {heldItem === 'beer' ? 'bere' : 'mangiare'}
+          {isCompactHud ? (
+            <span>Apri Azioni per usare {heldItem === 'beer' ? 'birra' : 'pretzel'}</span>
+          ) : (
+            <>
+              Premi
+              <kbd style={{
+                background: 'rgba(255,225,77,0.18)',
+                border: '1px solid rgba(255,225,77,0.6)',
+                borderRadius: '3px',
+                padding: '1px 7px',
+                color: '#ffe14d',
+                fontWeight: 'bold',
+              }}>B</kbd>
+              per {heldItem === 'beer' ? 'bere' : 'mangiare'}
+            </>
+          )}
         </div>
       )}
 
       {/* Chat */}
-      {inRoom && (
+      {inRoom && !isCompactHud && (
         <div style={{
           position: 'absolute',
           left: '16px',
@@ -724,8 +1062,9 @@ export const HUD: React.FC = () => {
       {inRoom && waiterAwaitingOrder && (
         <div style={{
           position: 'absolute',
-          right: '16px',
-          bottom: '52px',
+          right: isCompactHud ? '8px' : '16px',
+          left: isCompactHud ? '8px' : undefined,
+          bottom: isCompactHud ? '112px' : '52px',
           zIndex: 120,
           background: 'rgba(10,10,30,0.92)',
           border: '1px solid rgba(255,225,77,0.42)',

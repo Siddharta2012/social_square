@@ -32,6 +32,7 @@ import { useGameStore } from '../../store/gameStore';
 import { eventBus } from '../../eventBus';
 import { NetworkSystem } from '../../systems/NetworkSystem';
 import { VoiceSystem } from '../../systems/VoiceSystem';
+import { IsometricSystem } from '../../systems/IsometricSystem';
 import { RemoteAvatar } from '../../entities/RemoteAvatar';
 import { InteractStation } from '../../entities/InteractStation';
 import {
@@ -163,6 +164,7 @@ interface PetalBloom {
 const PETAL_MAX_ACTIVE = 5;
 const PETAL_SPAWN_INTERVAL_MS = 9000;
 const PETAL_COLLECT_RADIUS_TILES = 2.75;
+const PETAL_AUTO_COLLECT_RADIUS_TILES = 1.05;
 const PETAL_SPAWN_POINTS: Position[] = [
   { x: 3, y: 35 },
   { x: 12, y: 30 },
@@ -199,6 +201,7 @@ export class BarScene extends BaseRoomScene {
   private _voiceConnectSeq = 0;
   private _voiceSpatialElapsed = 0;
   private _localContextElapsed = 0;
+  private _petalCollectElapsed = 0;
   private _mutedVoiceUsers = new Set<string>();
 
   private static readonly BEER_SIPS = 3;
@@ -264,6 +267,7 @@ export class BarScene extends BaseRoomScene {
     }, this);
     eventBus.on('emote', (emoteId: EmoteId) => this._triggerEmote(emoteId), this);
     eventBus.on('leave-seat', () => this._leaveSeat(true), this);
+    eventBus.on('consume-held-item', () => this._consume(), this);
     eventBus.on('jukebox-toggle', () => this._requestJukeboxToggle(), this);
     eventBus.on('jukebox-next', () => this._requestJukeboxNext(), this);
     eventBus.on('chat-send', (text: string) => this._sendChatMessage(text), this);
@@ -293,6 +297,7 @@ export class BarScene extends BaseRoomScene {
       const store = useGameStore.getState();
       store.setShowWorldMap(!store.showWorldMap);
     });
+    this.input.on(Phaser.Input.Events.POINTER_DOWN, this._primePetalAudio, this);
 
     this.events.on(Phaser.Scenes.Events.SHUTDOWN, this._onShutdown, this);
   }
@@ -311,6 +316,11 @@ export class BarScene extends BaseRoomScene {
     }
     this._syncVoiceSpatial(delta);
     this._syncJukeboxExpiry();
+    this._petalCollectElapsed += delta;
+    if (this._petalCollectElapsed >= 80) {
+      this._petalCollectElapsed = 0;
+      this._collectNearbyPetals();
+    }
   }
 
   protected override collectDebugExtras(): Record<string, string | number | boolean | null> {
@@ -517,6 +527,7 @@ export class BarScene extends BaseRoomScene {
       draw: drawPetalBloom,
       hitWidth: 38,
       hitHeight: 42,
+      ambientGlow: true,
       onInteract: () => this._collectPetalBloom(bloom),
     });
 
@@ -524,18 +535,120 @@ export class BarScene extends BaseRoomScene {
     this._petalBlooms.push(bloom);
   }
 
-  private _collectPetalBloom(bloom: PetalBloom): void {
-    if (!this._isNear(bloom.position, PETAL_COLLECT_RADIUS_TILES)) {
+  private _collectNearbyPetals(): void {
+    const local = this._localPosition();
+    if (!local || this._petalBlooms.length === 0) return;
+
+    for (const bloom of [...this._petalBlooms]) {
+      if (isWithinInteractionRange(local, bloom.position, PETAL_AUTO_COLLECT_RADIUS_TILES)) {
+        this._collectPetalBloom(bloom, true);
+      }
+    }
+  }
+
+  private _collectPetalBloom(bloom: PetalBloom, automatic = false): void {
+    if (!automatic && !this._isNear(bloom.position, PETAL_COLLECT_RADIUS_TILES)) {
       this._showNotice('Avvicinati ai petali');
       return;
     }
 
     this._petalBlooms = this._petalBlooms.filter((candidate) => candidate !== bloom);
+    this._spawnPetalCollectBurst(bloom.position);
+    this._playPetalCollectSound();
     bloom.station.destroy();
     useGameStore.getState().addPetals(PETAL_BLOOM_VALUE);
     this._persistPetalDelta(PETAL_BLOOM_VALUE);
     this._showNotice(`+${PETAL_BLOOM_VALUE} petali`);
     this._syncLocalContext();
+  }
+
+  private _spawnPetalCollectBurst(position: Position): void {
+    const iso = IsometricSystem.worldToIso(position.x, position.y);
+    const colors = [0xffd166, 0xe85d75, 0x9b7cff, 0xffffff, 0x88ffbb];
+
+    for (let i = 0; i < 10; i++) {
+      const petal = this.add.graphics({ x: iso.x, y: iso.y - 22 });
+      petal.fillStyle(colors[i % colors.length], 1);
+      petal.fillEllipse(0, 0, 8, 4);
+      petal.setDepth(IsometricSystem.depth(position.x, position.y) + 8);
+      petal.setRotation((Math.PI * 2 * i) / 10);
+
+      const angle = (Math.PI * 2 * i) / 10;
+      const distance = 24 + (i % 3) * 8;
+      this.tweens.add({
+        targets: petal,
+        x: iso.x + Math.cos(angle) * distance,
+        y: iso.y - 52 + Math.sin(angle) * 12,
+        alpha: 0,
+        scale: 0.45,
+        duration: 520,
+        ease: 'Cubic.easeOut',
+        onComplete: () => petal.destroy(),
+      });
+    }
+
+    const text = this.add.text(iso.x, iso.y - 46, `+${PETAL_BLOOM_VALUE}`, {
+      fontSize: '18px',
+      color: '#fff4d0',
+      fontFamily: 'monospace',
+      fontStyle: 'bold',
+      stroke: '#1a1206',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(IsometricSystem.depth(position.x, position.y) + 9);
+
+    this.tweens.add({
+      targets: text,
+      y: iso.y - 86,
+      alpha: 0,
+      scale: 1.18,
+      duration: 720,
+      ease: 'Quad.easeOut',
+      onComplete: () => text.destroy(),
+    });
+  }
+
+  private _playPetalCollectSound(): void {
+    const context = this._getPetalAudioContext();
+    if (!context) return;
+
+    void context.resume();
+
+    const now = context.currentTime;
+    const master = context.createGain();
+    master.gain.setValueAtTime(0.0001, now);
+    master.gain.exponentialRampToValueAtTime(0.16, now + 0.018);
+    master.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    master.connect(context.destination);
+
+    for (const [index, frequency] of [660, 920, 1180].entries()) {
+      const oscillator = context.createOscillator();
+      oscillator.type = index === 0 ? 'triangle' : 'sine';
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.045);
+      oscillator.frequency.exponentialRampToValueAtTime(frequency * 1.18, now + 0.2 + index * 0.03);
+      oscillator.connect(master);
+      oscillator.start(now + index * 0.045);
+      oscillator.stop(now + 0.36 + index * 0.035);
+    }
+
+    navigator.vibrate?.(18);
+  }
+
+  private _primePetalAudio(): void {
+    const context = this._getPetalAudioContext();
+    if (context) void context.resume();
+  }
+
+  private _getPetalAudioContext(): AudioContext | null {
+    const win = window as Window & {
+      webkitAudioContext?: typeof AudioContext;
+      __socialSquarePetalAudioContext?: AudioContext;
+    };
+    const AudioContextCtor = window.AudioContext ?? win.webkitAudioContext;
+    if (!AudioContextCtor) return null;
+
+    const context = win.__socialSquarePetalAudioContext ?? new AudioContextCtor();
+    win.__socialSquarePetalAudioContext = context;
+    return context;
   }
 
   private _currentLocationId(): LocationId | string {
@@ -1260,6 +1373,7 @@ export class BarScene extends BaseRoomScene {
     eventBus.off('audio-input-change');
     eventBus.off('emote');
     eventBus.off('leave-seat');
+    eventBus.off('consume-held-item');
     eventBus.off('jukebox-toggle');
     eventBus.off('jukebox-next');
     eventBus.off('chat-send');
@@ -1274,6 +1388,7 @@ export class BarScene extends BaseRoomScene {
     this.input.keyboard?.off('keydown-THREE');
     this.input.keyboard?.off('keydown-J');
     this.input.keyboard?.off('keydown-M');
+    this.input.off(Phaser.Input.Events.POINTER_DOWN, this._primePetalAudio, this);
     this._jukebox.destroy();
     this._network.leaveRoom('bar');
     this._network.disconnect();
