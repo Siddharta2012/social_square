@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGameStore } from '../../../store/gameStore';
 import { POOL_OBJECT_ID } from '../../../world/interactions';
 import { requestPoolStart } from './poolMethods';
+import type { BarSceneContext } from './barSceneContext';
 
 function poolContext() {
   return {
@@ -33,7 +34,7 @@ describe('pool interactions', () => {
   it('syncs current position inside pool start requests', () => {
     const ctx = poolContext();
 
-    requestPoolStart.call(ctx, 'pool-start-solo');
+    requestPoolStart.call(ctx as unknown as BarSceneContext, 'pool-start-solo');
 
     expect(ctx._network.emitMove).toHaveBeenCalledWith(9, 8, Direction.SE, 'idle', true);
     expect(ctx._network.emitInteract).toHaveBeenCalledWith(

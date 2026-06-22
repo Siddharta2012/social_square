@@ -1,8 +1,9 @@
 import { RemoteAvatar } from '../../../entities/RemoteAvatar';
 import { useGameStore } from '../../../store/gameStore';
 import type { AvatarConfig, AvatarState, HeldItem } from '@social-square/shared';
+import type { BarSceneContext } from './barSceneContext';
 
-export function destroyAllRemotes(this: any): void {
+export function destroyAllRemotes(this: BarSceneContext): void {
   this._remoteAvatars.forEach((avatar: RemoteAvatar, userId: string) => {
     this.isoSystem.unregister(avatar);
     avatar.destroy();
@@ -16,7 +17,7 @@ export function destroyAllRemotes(this: any): void {
 }
 
 export function spawnRemote(
-  this: any,
+  this: BarSceneContext,
   userId: string,
   username: string,
   worldX: number,
@@ -35,12 +36,12 @@ export function spawnRemote(
   this._syncVoiceSpatial(999);
 }
 
-export function updateRemoteAvatar(this: any, userId: string, avatarConfig: AvatarConfig): void {
+export function updateRemoteAvatar(this: BarSceneContext, userId: string, avatarConfig: AvatarConfig): void {
   this._remoteAvatars.get(userId)?.setAvatarConfig(avatarConfig);
 }
 
 export function attachRemoteInteractions(
-  this: any,
+  this: BarSceneContext,
   userId: string,
   username: string,
   avatar: RemoteAvatar,
@@ -76,7 +77,7 @@ export function attachRemoteInteractions(
   avatar.on('pointerupoutside', clearTimer);
 }
 
-export function destroyRemote(this: any, userId: string): void {
+export function destroyRemote(this: BarSceneContext, userId: string): void {
   const avatar = this._remoteAvatars.get(userId);
   if (!avatar) return;
   this.isoSystem.unregister(avatar);

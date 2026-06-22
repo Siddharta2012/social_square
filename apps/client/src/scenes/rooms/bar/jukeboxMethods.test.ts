@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGameStore } from '../../../store/gameStore';
 import { JUKEBOX_OBJECT_ID } from '../../../world/interactions';
 import { requestJukeboxPlayUrl } from './jukeboxMethods';
+import type { BarSceneContext } from './barSceneContext';
 
 function jukeboxContext() {
   return {
@@ -27,7 +28,7 @@ describe('jukebox interactions', () => {
   it('syncs server position before playing a YouTube URL', () => {
     const ctx = jukeboxContext();
 
-    requestJukeboxPlayUrl.call(ctx, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+    requestJukeboxPlayUrl.call(ctx as unknown as BarSceneContext, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
 
     expect(ctx._network.emitMove).toHaveBeenCalledWith(16, 3, Direction.SE, 'idle', true);
     expect(ctx._network.emitInteract).toHaveBeenCalledWith(
@@ -48,7 +49,7 @@ describe('jukebox interactions', () => {
   it('does not charge or emit when the YouTube URL is invalid', () => {
     const ctx = jukeboxContext();
 
-    requestJukeboxPlayUrl.call(ctx, 'https://example.com/watch?v=dQw4w9WgXcQ');
+    requestJukeboxPlayUrl.call(ctx as unknown as BarSceneContext, 'https://example.com/watch?v=dQw4w9WgXcQ');
 
     expect(ctx._network.emitMove).not.toHaveBeenCalled();
     expect(ctx._network.emitInteract).not.toHaveBeenCalled();

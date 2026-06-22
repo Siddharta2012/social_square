@@ -12,13 +12,14 @@ import {
   type LocationId,
 } from '../../../world/locations';
 import { drawExitMarker } from './stationIcons';
+import type { BarSceneContext } from './barSceneContext';
 
-export function currentLocationId(this: any): LocationId | string {
+export function currentLocationId(this: BarSceneContext): LocationId | string {
   const local = this._localPosition();
   return local ? locationIdForPosition(local) : '0,0';
 }
 
-export function rebuildExitStations(this: any): void {
+export function rebuildExitStations(this: BarSceneContext): void {
   this._exitStations.forEach((station: InteractStation) => station.destroy());
   this._exitStations = [];
 
@@ -37,7 +38,7 @@ export function rebuildExitStations(this: any): void {
   }
 }
 
-export function nearestExit(this: any, position: Position, radius = 4.25): LocationExit | null {
+export function nearestExit(this: BarSceneContext, position: Position, radius = 4.25): LocationExit | null {
   let best: { exit: LocationExit; distance: number } | null = null;
   for (const exit of exitsForLocation(locationIdForPosition(position))) {
     const dx = exit.trigger.x - position.x;
@@ -49,7 +50,7 @@ export function nearestExit(this: any, position: Position, radius = 4.25): Locat
   return best?.exit ?? null;
 }
 
-export function beginExitTravel(this: any, exit: LocationExit): void {
+export function beginExitTravel(this: BarSceneContext, exit: LocationExit): void {
   if (Date.now() - this._lastTravelAt < 500) return;
   this._pendingExit = exit;
   const local = this._localPosition();
@@ -66,7 +67,7 @@ export function beginExitTravel(this: any, exit: LocationExit): void {
   }
 }
 
-export function updatePendingExit(this: any): void {
+export function updatePendingExit(this: BarSceneContext): void {
   if (!this._pendingExit || this.movementSystem.isMoving) return;
   const exit = this._pendingExit;
   const local = this._localPosition();
@@ -74,7 +75,7 @@ export function updatePendingExit(this: any): void {
   void this._enterLocation(exit.targetId, exit.arrival);
 }
 
-export function checkExitTileTravel(this: any): void {
+export function checkExitTileTravel(this: BarSceneContext): void {
   if (this._pendingExit || this.movementSystem.isMoving || Date.now() - this._lastTravelAt < 650) return;
   const local = this._localPosition();
   if (!local) return;
@@ -84,13 +85,13 @@ export function checkExitTileTravel(this: any): void {
   if (exit) void this._enterLocation(exit.targetId, exit.arrival);
 }
 
-export function fastTravel(this: any, locationId: LocationId): void {
+export function fastTravel(this: BarSceneContext, locationId: LocationId): void {
   const location = locationForId(locationId);
   if (!location) return;
   void this._enterLocation(location.id, location.spawn);
 }
 
-export async function enterLocation(this: any, locationId: LocationId, position: Position): Promise<void> {
+export async function enterLocation(this: BarSceneContext, locationId: LocationId, position: Position): Promise<void> {
   const location = locationForId(locationId);
   if (!location) return;
 

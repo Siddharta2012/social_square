@@ -2,8 +2,9 @@ import { t } from '../../../i18n';
 import { isWithinInteractionRange, type SeatDefinition } from '../../../world/interactions';
 import { locationIdForPosition } from '../../../world/locations';
 import type { ObjectState } from '@social-square/shared';
+import type { BarSceneContext } from './barSceneContext';
 
-export function beginSeatInteraction(this: any, seat: SeatDefinition): void {
+export function beginSeatInteraction(this: BarSceneContext, seat: SeatDefinition): void {
   const occupant = this._seatOccupants.get(seat.id);
   if (occupant && occupant !== this._myUserId) {
     this._showNotice(t('bar.notice.seatOccupied'));
@@ -29,7 +30,7 @@ export function beginSeatInteraction(this: any, seat: SeatDefinition): void {
   if (!started) this._requestSit(seat);
 }
 
-export function updatePendingSeat(this: any): void {
+export function updatePendingSeat(this: BarSceneContext): void {
   if (!this._pendingSeat || this.movementSystem.isMoving) return;
   const seat = this._pendingSeat;
   const local = { x: this.movementSystem.posX, y: this.movementSystem.posY };
@@ -39,12 +40,12 @@ export function updatePendingSeat(this: any): void {
   this._requestSit(seat);
 }
 
-export function requestSit(this: any, seat: SeatDefinition): void {
+export function requestSit(this: BarSceneContext, seat: SeatDefinition): void {
   this._network?.emitInteract(seat.id, 'seat-sit', { x: seat.x, y: seat.y });
   this._applySeatState(seat.id, { kind: 'seat', occupiedBy: this._myUserId, x: seat.x, y: seat.y });
 }
 
-export function leaveSeat(this: any, emit: boolean): void {
+export function leaveSeat(this: BarSceneContext, emit: boolean): void {
   if (!this._seatedSeatId) return;
   const seatId = this._seatedSeatId;
   this._seatedSeatId = null;
@@ -58,7 +59,7 @@ export function leaveSeat(this: any, emit: boolean): void {
   }
 }
 
-export function applySeatState(this: any, objectId: string, objectState: ObjectState): void {
+export function applySeatState(this: BarSceneContext, objectId: string, objectState: ObjectState): void {
   const occupiedBy = typeof objectState.occupiedBy === 'string' ? objectState.occupiedBy : null;
   const x = typeof objectState.x === 'number' ? objectState.x : null;
   const y = typeof objectState.y === 'number' ? objectState.y : null;

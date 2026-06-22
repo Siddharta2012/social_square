@@ -16,14 +16,10 @@
  */
 
 import type { JukeboxPlayer } from '../../../audio/JukeboxPlayer';
-import type { Avatar } from '../../../entities/Avatar';
 import type { InteractStation } from '../../../entities/InteractStation';
 import type { RemoteAvatar } from '../../../entities/RemoteAvatar';
-import type { IsometricSystem } from '../../../systems/IsometricSystem';
-import type { MovementSystem } from '../../../systems/MovementSystem';
 import type { NetworkSystem } from '../../../systems/NetworkSystem';
 import type { VoiceSystem } from '../../../systems/VoiceSystem';
-import type { WorldMap } from '../../../world/WorldMap';
 import type { SeatDefinition } from '../../../world/interactions';
 import type { LocationExit, LocationId } from '../../../world/locations';
 import type {
@@ -35,18 +31,19 @@ import type {
   Position,
   WaiterState,
 } from '@social-square/shared';
+import type { BaseRoomScene } from '../BaseRoomScene';
 import type { PetalBloom, PendingPetalCollect } from './petalMethods';
 
-// PoolState is re-exported from @social-square/shared but normalizePoolState returns it
-// directly; import it here so the field type is concrete.
+// BarSceneContext extends BaseRoomScene so that:
+//  1. The protected fields (isoSystem, movementSystem, localAvatar, worldMap) and
+//     protected methods (setLocalAvatarState, setLocalAvatarTile, refreshWorldAt,
+//     destroyWorld) are inherited with the correct protected access modifier.
+//  2. BarScene (which also extends BaseRoomScene) is structurally assignable to
+//     BarSceneContext at the .call(this) sites in BarScene.ts without casts.
+//  3. Module functions with `this: BarSceneContext` can access those protected
+//     members as TypeScript treats the this-typed function as a subclass method.
 
-export interface BarSceneContext extends Phaser.Scene {
-  // ─── BaseRoomScene protected members ────────────────────────────────────────
-  isoSystem: IsometricSystem;
-  movementSystem: MovementSystem;
-  localAvatar: Avatar;
-  worldMap: WorldMap;
-
+export interface BarSceneContext extends BaseRoomScene {
   // ─── BarScene private fields ─────────────────────────────────────────────────
   _network: NetworkSystem;
   _voice: VoiceSystem | null;
@@ -83,12 +80,6 @@ export interface BarSceneContext extends Phaser.Scene {
   _mutedVoiceUsers: Set<string>;
   _speakingVoiceUsers: Set<string>;
   _lastSpeakingUiKey: string;
-
-  // ─── BaseRoomScene protected methods ────────────────────────────────────────
-  setLocalAvatarState(state: AvatarState | null): void;
-  setLocalAvatarTile(x: number, y: number, state?: AvatarState | null): void;
-  refreshWorldAt(x: number, y: number): Promise<void>;
-  destroyWorld(): void;
 
   // ─── Private BarScene methods (cross-module stubs) ───────────────────────────
   // These are the private methods of BarScene that modules call on `this`.

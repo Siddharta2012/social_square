@@ -22,12 +22,13 @@ import {
   drawPretzelStand,
 } from './stationIcons';
 import type { HeldItem, Position } from '@social-square/shared';
+import type { BarSceneContext } from './barSceneContext';
 
 const BEER_SIPS = 3;
 const PRETZEL_BITES = 2;
 const COUNTER_FIXTURE_DEPTH = 8.6;
 
-export function rebuildLocationStations(this: any): void {
+export function rebuildLocationStations(this: BarSceneContext): void {
   this._destroyLocationStations();
   const locationId = this._currentLocationId();
 
@@ -96,12 +97,12 @@ export function rebuildLocationStations(this: any): void {
   }
 }
 
-export function destroyLocationStations(this: any): void {
+export function destroyLocationStations(this: BarSceneContext): void {
   this._stations.forEach((station: InteractStation) => station.destroy());
   this._stations = [];
 }
 
-export function pickUpFromStation(this: any, item: HeldItem, position: Position): void {
+export function pickUpFromStation(this: BarSceneContext, item: HeldItem, position: Position): void {
   if (!this._isNear(position)) {
     this._showNotice(t('bar.notice.counterNear'));
     return;
@@ -110,7 +111,7 @@ export function pickUpFromStation(this: any, item: HeldItem, position: Position)
   this._network?.emitInteract(BAR_SERVICE_OBJECT_ID, 'pickup-item', { item });
 }
 
-export function pickUp(this: any, item: HeldItem): void {
+export function pickUp(this: BarSceneContext, item: HeldItem): void {
   if (!item) return;
 
   this._sipsLeft = item === 'beer' ? BEER_SIPS : PRETZEL_BITES;
@@ -119,7 +120,7 @@ export function pickUp(this: any, item: HeldItem): void {
   this._network.emitHoldItem(item);
 }
 
-export function consume(this: any): void {
+export function consume(this: BarSceneContext): void {
   const item = this.localAvatar?.heldItem;
   if (!item) return;
 
@@ -135,17 +136,17 @@ export function consume(this: any): void {
   }
 }
 
-export function localPosition(this: any): Position | null {
+export function localPosition(this: BarSceneContext): Position | null {
   if (!this.localAvatar) return null;
   return { x: this.movementSystem.posX, y: this.movementSystem.posY };
 }
 
-export function isNear(this: any, position: Position, radius = INTERACTION_RADIUS_TILES): boolean {
+export function isNear(this: BarSceneContext, position: Position, radius = INTERACTION_RADIUS_TILES): boolean {
   const local = this._localPosition();
   return local ? isWithinInteractionRange(local, position, radius) : false;
 }
 
-export function syncLocalContext(this: any): void {
+export function syncLocalContext(this: BarSceneContext): void {
   const local = this._localPosition();
   if (!local) return;
 
@@ -169,7 +170,7 @@ export function syncLocalContext(this: any): void {
   store.setActionAvailability({ nearJukebox, nearWaiter, nearPool, canAffordAction, canAffordPool });
 }
 
-export function showNotice(this: any, message: string): void {
+export function showNotice(this: BarSceneContext, message: string): void {
   if (!this._noticeText) {
     this._noticeText = this.add.text(this.scale.width / 2, 62, message, {
       fontSize: '12px',

@@ -45,6 +45,7 @@ import * as voiceMethods from './bar/voiceMethods';
 import * as waiterMethods from './bar/waiterMethods';
 import { BaseRoomScene, type WorldConfig } from './BaseRoomScene';
 import type { PendingPetalCollect, PetalBloom } from './bar/petalMethods';
+import type { BarSceneContext } from './bar/barSceneContext';
 import type { VoiceSystem } from '../../systems/VoiceSystem';
 import type {
   AvatarState,
@@ -272,129 +273,129 @@ export class BarScene extends BaseRoomScene {
   // ── Interactive stations ────────────────────────────────────────────────────
 
   private _rebuildLocationStations(): void {
-    stationMethods.rebuildLocationStations.call(this);
+    stationMethods.rebuildLocationStations.call(this as unknown as BarSceneContext);
   }
 
   private _destroyLocationStations(): void {
-    stationMethods.destroyLocationStations.call(this);
+    stationMethods.destroyLocationStations.call(this as unknown as BarSceneContext);
   }
 
   private _pickUpFromStation(item: HeldItem, position: Position): void {
-    stationMethods.pickUpFromStation.call(this, item, position);
+    stationMethods.pickUpFromStation.call(this as unknown as BarSceneContext, item, position);
   }
 
   private _pickUp(item: HeldItem): void {
-    stationMethods.pickUp.call(this, item);
+    stationMethods.pickUp.call(this as unknown as BarSceneContext, item);
   }
 
   private _consume(): void {
-    stationMethods.consume.call(this);
+    stationMethods.consume.call(this as unknown as BarSceneContext);
   }
 
   // ── Network setup ─────────────────────────────────────────────────────────
 
   private _localPosition(): Position | null {
-    return stationMethods.localPosition.call(this);
+    return stationMethods.localPosition.call(this as unknown as BarSceneContext);
   }
 
   private _waiterPosition(): Position {
-    return waiterMethods.waiterPosition.call(this);
+    return waiterMethods.waiterPosition.call(this as unknown as BarSceneContext);
   }
 
   private _isNear(position: Position, radius = INTERACTION_RADIUS_TILES): boolean {
-    return stationMethods.isNear.call(this, position, radius);
+    return stationMethods.isNear.call(this as unknown as BarSceneContext, position, radius);
   }
 
   private _syncLocalContext(): void {
-    stationMethods.syncLocalContext.call(this);
+    stationMethods.syncLocalContext.call(this as unknown as BarSceneContext);
   }
 
   private _startPetalSpawns(): void {
-    petalMethods.startPetalSpawns.call(this);
+    petalMethods.startPetalSpawns.call(this as unknown as BarSceneContext);
   }
 
   private _seedPetalBloomsForLocation(): void {
-    petalMethods.seedPetalBloomsForLocation.call(this);
+    petalMethods.seedPetalBloomsForLocation.call(this as unknown as BarSceneContext);
   }
 
   private _maybeSpawnPetalBloom(): void {
-    petalMethods.maybeSpawnPetalBloom.call(this);
+    petalMethods.maybeSpawnPetalBloom.call(this as unknown as BarSceneContext);
   }
 
   private _spawnPetalBloom(): boolean {
-    return petalMethods.spawnPetalBloom.call(this);
+    return petalMethods.spawnPetalBloom.call(this as unknown as BarSceneContext);
   }
 
   private _createPetalBloom(position: Position, amount: number): PetalBloom {
-    return petalMethods.createPetalBloom.call(this, position, amount);
+    return petalMethods.createPetalBloom.call(this as unknown as BarSceneContext, position, amount);
   }
 
   private _sweepStalePetalCollects(): void {
-    petalMethods.sweepStalePetalCollects.call(this);
+    petalMethods.sweepStalePetalCollects.call(this as unknown as BarSceneContext);
   }
 
   private _collectNearbyPetals(): void {
-    petalMethods.collectNearbyPetals.call(this);
+    petalMethods.collectNearbyPetals.call(this as unknown as BarSceneContext);
   }
 
   private _collectPetalBloom(bloom: PetalBloom, automatic = false): void {
-    petalMethods.collectPetalBloom.call(this, bloom, automatic);
+    petalMethods.collectPetalBloom.call(this as unknown as BarSceneContext, bloom, automatic);
   }
 
   private _confirmPetalCollected(position: Position, amount: number, petals: number, requestId?: string): void {
-    petalMethods.confirmPetalCollected.call(this, position, amount, petals, requestId);
+    petalMethods.confirmPetalCollected.call(this as unknown as BarSceneContext, position, amount, petals, requestId);
   }
 
   private _removePetalBloom(bloom: PetalBloom): void {
-    petalMethods.removePetalBloom.call(this, bloom);
+    petalMethods.removePetalBloom.call(this as unknown as BarSceneContext, bloom);
   }
 
   private _syncPetalPositionForServer(): Position | null {
-    return petalMethods.syncPetalPositionForServer.call(this);
+    return petalMethods.syncPetalPositionForServer.call(this as unknown as BarSceneContext);
   }
 
   private _rollbackPendingPetalCollect(requestId: string | undefined, message: string): void {
-    petalMethods.rollbackPendingPetalCollect.call(this, requestId, message);
+    petalMethods.rollbackPendingPetalCollect.call(this as unknown as BarSceneContext, requestId, message);
   }
 
   private _rollbackLatestPendingPetalCollect(message: string): void {
-    petalMethods.rollbackLatestPendingPetalCollect.call(this, message);
+    petalMethods.rollbackLatestPendingPetalCollect.call(this as unknown as BarSceneContext, message);
   }
 
   private _forgetLatestPendingPetalCollect(): void {
-    petalMethods.forgetLatestPendingPetalCollect.call(this);
+    petalMethods.forgetLatestPendingPetalCollect.call(this as unknown as BarSceneContext);
   }
 
   private _forgetPendingPetalCollect(requestId: string): void {
-    petalMethods.forgetPendingPetalCollect.call(this, requestId);
+    petalMethods.forgetPendingPetalCollect.call(this as unknown as BarSceneContext, requestId);
   }
 
   private _removeOptimisticPetalCredit(pending: PendingPetalCollect): void {
-    petalMethods.removeOptimisticPetalCredit.call(this, pending);
+    petalMethods.removeOptimisticPetalCredit.call(this as unknown as BarSceneContext, pending);
   }
 
   private _applyServerPetals(petals: number): void {
-    petalMethods.applyServerPetals.call(this, petals);
+    petalMethods.applyServerPetals.call(this as unknown as BarSceneContext, petals);
   }
 
   private _acceptPetalServerTotal(petals: number): void {
-    petalMethods.acceptPetalServerTotal.call(this, petals);
+    petalMethods.acceptPetalServerTotal.call(this as unknown as BarSceneContext, petals);
   }
 
   private _pendingPetalValue(): number {
-    return petalMethods.pendingPetalValue.call(this);
+    return petalMethods.pendingPetalValue.call(this as unknown as BarSceneContext);
   }
 
   private _spawnPetalCollectBurst(position: Position, amount: number): void {
-    petalMethods.spawnPetalCollectBurst.call(this, position, amount);
+    petalMethods.spawnPetalCollectBurst.call(this as unknown as BarSceneContext, position, amount);
   }
 
   private _playPetalCollectSound(): void {
-    petalMethods.playPetalCollectSound.call(this);
+    petalMethods.playPetalCollectSound.call(this as unknown as BarSceneContext);
   }
 
   private _primePetalAudio(): void {
-    petalMethods.primePetalAudio.call(this);
+    petalMethods.primePetalAudio.call(this as unknown as BarSceneContext);
   }
 
   private _getPetalAudioContext(): AudioContext | null {
@@ -402,59 +403,59 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _currentLocationId(): LocationId | string {
-    return locationMethods.currentLocationId.call(this);
+    return locationMethods.currentLocationId.call(this as unknown as BarSceneContext);
   }
 
   private _rebuildExitStations(): void {
-    locationMethods.rebuildExitStations.call(this);
+    locationMethods.rebuildExitStations.call(this as unknown as BarSceneContext);
   }
 
   private _nearestExit(position: Position, radius = 4.25): LocationExit | null {
-    return locationMethods.nearestExit.call(this, position, radius);
+    return locationMethods.nearestExit.call(this as unknown as BarSceneContext, position, radius);
   }
 
   private _beginExitTravel(exit: LocationExit): void {
-    locationMethods.beginExitTravel.call(this, exit);
+    locationMethods.beginExitTravel.call(this as unknown as BarSceneContext, exit);
   }
 
   private _updatePendingExit(): void {
-    locationMethods.updatePendingExit.call(this);
+    locationMethods.updatePendingExit.call(this as unknown as BarSceneContext);
   }
 
   private _checkExitTileTravel(): void {
-    locationMethods.checkExitTileTravel.call(this);
+    locationMethods.checkExitTileTravel.call(this as unknown as BarSceneContext);
   }
 
   private _fastTravel(locationId: LocationId): void {
-    locationMethods.fastTravel.call(this, locationId);
+    locationMethods.fastTravel.call(this as unknown as BarSceneContext, locationId);
   }
 
   private async _enterLocation(locationId: LocationId, position: Position): Promise<void> {
-    await locationMethods.enterLocation.call(this, locationId, position);
+    await locationMethods.enterLocation.call(this as unknown as BarSceneContext, locationId, position);
   }
 
   private _destroyAllRemotes(): void {
-    remoteMethods.destroyAllRemotes.call(this);
+    remoteMethods.destroyAllRemotes.call(this as unknown as BarSceneContext);
   }
 
   private _clearPetalBlooms(): void {
-    petalMethods.clearPetalBlooms.call(this);
+    petalMethods.clearPetalBlooms.call(this as unknown as BarSceneContext);
   }
 
   private _beginSeatInteraction(seat: SeatDefinition): void {
-    seatMethods.beginSeatInteraction.call(this, seat);
+    seatMethods.beginSeatInteraction.call(this as unknown as BarSceneContext, seat);
   }
 
   private _updatePendingSeat(): void {
-    seatMethods.updatePendingSeat.call(this);
+    seatMethods.updatePendingSeat.call(this as unknown as BarSceneContext);
   }
 
   private _requestSit(seat: SeatDefinition): void {
-    seatMethods.requestSit.call(this, seat);
+    seatMethods.requestSit.call(this as unknown as BarSceneContext, seat);
   }
 
   private _leaveSeat(emit: boolean): void {
-    seatMethods.leaveSeat.call(this, emit);
+    seatMethods.leaveSeat.call(this as unknown as BarSceneContext, emit);
   }
 
   private _triggerEmote(emoteId: EmoteId): void {
@@ -476,83 +477,83 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _callWaiter(): void {
-    waiterMethods.callWaiter.call(this);
+    waiterMethods.callWaiter.call(this as unknown as BarSceneContext);
   }
 
   private _placeWaiterOrder(item: OrderItemId): void {
-    waiterMethods.placeWaiterOrder.call(this, item);
+    waiterMethods.placeWaiterOrder.call(this as unknown as BarSceneContext, item);
   }
 
   private _ensureWaiterAvatar(waiter: WaiterState): RemoteAvatar {
-    return waiterMethods.ensureWaiterAvatar.call(this, waiter);
+    return waiterMethods.ensureWaiterAvatar.call(this as unknown as BarSceneContext, waiter);
   }
 
   private _destroyWaiterAvatar(): void {
-    waiterMethods.destroyWaiterAvatar.call(this);
+    waiterMethods.destroyWaiterAvatar.call(this as unknown as BarSceneContext);
   }
 
   private _applyWaiterState(rawState: unknown): void {
-    waiterMethods.applyWaiterState.call(this, rawState);
+    waiterMethods.applyWaiterState.call(this as unknown as BarSceneContext, rawState);
   }
 
   private _isInWaiterLocation(): boolean {
-    return waiterMethods.isInWaiterLocation.call(this);
+    return waiterMethods.isInWaiterLocation.call(this as unknown as BarSceneContext);
   }
 
   private _requestJukeboxToggle(): void {
-    jukeboxMethods.requestJukeboxToggle.call(this);
+    jukeboxMethods.requestJukeboxToggle.call(this as unknown as BarSceneContext);
   }
 
   private _requestJukeboxNext(): void {
-    jukeboxMethods.requestJukeboxNext.call(this);
+    jukeboxMethods.requestJukeboxNext.call(this as unknown as BarSceneContext);
   }
 
   private _requestJukeboxPlayUrl(url: string): void {
-    jukeboxMethods.requestJukeboxPlayUrl.call(this, url);
+    jukeboxMethods.requestJukeboxPlayUrl.call(this as unknown as BarSceneContext, url);
   }
 
   private async _applyJukeboxState(rawState: unknown): Promise<void> {
-    await jukeboxMethods.applyJukeboxState.call(this, rawState);
+    await jukeboxMethods.applyJukeboxState.call(this as unknown as BarSceneContext, rawState);
   }
 
   private _isInJukeboxLocation(): boolean {
-    return jukeboxMethods.isInJukeboxLocation.call(this);
+    return jukeboxMethods.isInJukeboxLocation.call(this as unknown as BarSceneContext);
   }
 
   private _requestPoolOpen(): void {
-    poolMethods.requestPoolOpen.call(this);
+    poolMethods.requestPoolOpen.call(this as unknown as BarSceneContext);
   }
 
   private _requestPoolStart(action: 'pool-start-solo' | 'pool-create-duo' | 'pool-join-duo'): void {
-    poolMethods.requestPoolStart.call(this, action);
+    poolMethods.requestPoolStart.call(this as unknown as BarSceneContext, action);
   }
 
   private _requestPoolShot(shot: { angle: number; power: number; spin?: number }): void {
-    poolMethods.requestPoolShot.call(this, shot);
+    poolMethods.requestPoolShot.call(this as unknown as BarSceneContext, shot);
   }
 
   private _requestPoolSync(payload: { balls: PoolBall[]; scratched: boolean }): void {
-    poolMethods.requestPoolSync.call(this, payload);
+    poolMethods.requestPoolSync.call(this as unknown as BarSceneContext, payload);
   }
 
   private _requestPoolPlaceCue(payload: { x: number; y: number }): void {
-    poolMethods.requestPoolPlaceCue.call(this, payload);
+    poolMethods.requestPoolPlaceCue.call(this as unknown as BarSceneContext, payload);
   }
 
   private _requestPoolLeave(): void {
-    poolMethods.requestPoolLeave.call(this);
+    poolMethods.requestPoolLeave.call(this as unknown as BarSceneContext);
   }
 
   private _applyPoolState(rawState: unknown): void {
-    poolMethods.applyPoolState.call(this, rawState);
+    poolMethods.applyPoolState.call(this as unknown as BarSceneContext, rawState);
   }
 
   private _isInPoolLocation(): boolean {
-    return poolMethods.isInPoolLocation.call(this);
+    return poolMethods.isInPoolLocation.call(this as unknown as BarSceneContext);
   }
 
   private _showPoolMessage(message: string, tone: 'info' | 'error'): void {
-    poolMethods.showPoolMessage.call(this, message, tone);
+    poolMethods.showPoolMessage.call(this as unknown as BarSceneContext, message, tone);
   }
 
   private _syncPoolInputLock(): void {
@@ -562,19 +563,19 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _syncPoolPositionForServer(): Position | null {
-    return poolMethods.syncPoolPositionForServer.call(this);
+    return poolMethods.syncPoolPositionForServer.call(this as unknown as BarSceneContext);
   }
 
   private _syncJukeboxForLocation(): void {
-    jukeboxMethods.syncJukeboxForLocation.call(this);
+    jukeboxMethods.syncJukeboxForLocation.call(this as unknown as BarSceneContext);
   }
 
   private _syncJukeboxSpatial(): void {
-    jukeboxMethods.syncJukeboxSpatial.call(this);
+    jukeboxMethods.syncJukeboxSpatial.call(this as unknown as BarSceneContext);
   }
 
   private _syncJukeboxExpiry(): void {
-    jukeboxMethods.syncJukeboxExpiry.call(this);
+    jukeboxMethods.syncJukeboxExpiry.call(this as unknown as BarSceneContext);
   }
 
   private _applyObjectState(objectId: string, objectState: ObjectState): void {
@@ -594,15 +595,15 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _applySeatState(objectId: string, objectState: ObjectState): void {
-    seatMethods.applySeatState.call(this, objectId, objectState);
+    seatMethods.applySeatState.call(this as unknown as BarSceneContext, objectId, objectState);
   }
 
   private _showNotice(message: string): void {
-    stationMethods.showNotice.call(this, message);
+    stationMethods.showNotice.call(this as unknown as BarSceneContext, message);
   }
 
   private _setupNetwork(): void {
-    networkMethods.setupNetwork.call(this);
+    networkMethods.setupNetwork.call(this as unknown as BarSceneContext);
   }
 
   private _joinNetworkRoom(roomId: string, name: string): void {
@@ -630,19 +631,19 @@ export class BarScene extends BaseRoomScene {
   // ── Voice ─────────────────────────────────────────────────────────────────
 
   private async _setupVoice(): Promise<void> {
-    await voiceMethods.setupVoice.call(this);
+    await voiceMethods.setupVoice.call(this as unknown as BarSceneContext);
   }
 
   private async _connectVoiceForCurrentLocation(): Promise<void> {
-    await voiceMethods.connectVoiceForCurrentLocation.call(this);
+    await voiceMethods.connectVoiceForCurrentLocation.call(this as unknown as BarSceneContext);
   }
 
   private _syncVoiceSpatial(deltaMs: number): void {
-    voiceMethods.syncVoiceSpatial.call(this, deltaMs);
+    voiceMethods.syncVoiceSpatial.call(this as unknown as BarSceneContext, deltaMs);
   }
 
   private _setRemoteVoiceMuted(userId: string, muted: boolean): void {
-    voiceMethods.setRemoteVoiceMuted.call(this, userId, muted);
+    voiceMethods.setRemoteVoiceMuted.call(this as unknown as BarSceneContext, userId, muted);
   }
 
   private _onSpeakingChanged(userId: string, speaking: boolean): void {
@@ -669,15 +670,15 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _setSpeakingUi(users: Array<{ userId: string; username: string; distance: number; volume: number; pan: number }>): void {
-    voiceMethods.setSpeakingUi.call(this, users);
+    voiceMethods.setSpeakingUi.call(this as unknown as BarSceneContext, users);
   }
 
   private _loadMutedVoiceUsers(): void {
-    voiceMethods.loadMutedVoiceUsers.call(this);
+    voiceMethods.loadMutedVoiceUsers.call(this as unknown as BarSceneContext);
   }
 
   private _saveMutedVoiceUsers(): void {
-    voiceMethods.saveMutedVoiceUsers.call(this);
+    voiceMethods.saveMutedVoiceUsers.call(this as unknown as BarSceneContext);
   }
 
   private _spawnRemote(
@@ -689,11 +690,11 @@ export class BarScene extends BaseRoomScene {
     state: AvatarState = 'idle',
     avatarConfig?: AvatarConfig,
   ): void {
-    remoteMethods.spawnRemote.call(this, userId, username, worldX, worldY, heldItem, state, avatarConfig);
+    remoteMethods.spawnRemote.call(this as unknown as BarSceneContext, userId, username, worldX, worldY, heldItem, state, avatarConfig);
   }
 
   private _updateRemoteAvatar(userId: string, avatarConfig: AvatarConfig): void {
-    remoteMethods.updateRemoteAvatar.call(this, userId, avatarConfig);
+    remoteMethods.updateRemoteAvatar.call(this as unknown as BarSceneContext, userId, avatarConfig);
   }
 
   private _setRemoteAvatarActive(userId: string, active: boolean): void {
@@ -702,16 +703,16 @@ export class BarScene extends BaseRoomScene {
   }
 
   private _attachRemoteInteractions(userId: string, username: string, avatar: RemoteAvatar): void {
-    remoteMethods.attachRemoteInteractions.call(this, userId, username, avatar);
+    remoteMethods.attachRemoteInteractions.call(this as unknown as BarSceneContext, userId, username, avatar);
   }
 
   private _destroyRemote(userId: string): void {
-    remoteMethods.destroyRemote.call(this, userId);
+    remoteMethods.destroyRemote.call(this as unknown as BarSceneContext, userId);
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
   private _onShutdown(): void {
-    shutdownMethods.onShutdown.call(this);
+    shutdownMethods.onShutdown.call(this as unknown as BarSceneContext);
   }
 }

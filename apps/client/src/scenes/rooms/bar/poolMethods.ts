@@ -9,12 +9,13 @@ import {
 import { t } from '../../../i18n';
 import { useGameStore } from '../../../store/gameStore';
 import type { PoolBall } from '@social-square/shared';
+import type { BarSceneContext } from './barSceneContext';
 
 function requestId(prefix: string): string {
   return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}:${Math.random().toString(36).slice(2)}`}`;
 }
 
-export function requestPoolOpen(this: any): void {
+export function requestPoolOpen(this: BarSceneContext): void {
   if (!this._isInPoolLocation()) {
     this._showPoolMessage(t('pool.available'), 'error');
     return;
@@ -30,7 +31,7 @@ export function requestPoolOpen(this: any): void {
 }
 
 export function requestPoolStart(
-  this: any,
+  this: BarSceneContext,
   action: 'pool-start-solo' | 'pool-create-duo' | 'pool-join-duo',
 ): void {
   if (!this._isInPoolLocation()) {
@@ -54,7 +55,7 @@ export function requestPoolStart(
   });
 }
 
-export function requestPoolShot(this: any, shot: { angle: number; power: number; spin?: number }): void {
+export function requestPoolShot(this: BarSceneContext, shot: { angle: number; power: number; spin?: number }): void {
   this._network?.emitInteract(POOL_OBJECT_ID, 'pool-shot', {
     angle: shot.angle,
     power: shot.power,
@@ -63,7 +64,7 @@ export function requestPoolShot(this: any, shot: { angle: number; power: number;
   });
 }
 
-export function requestPoolSync(this: any, payload: { balls: PoolBall[]; scratched: boolean }): void {
+export function requestPoolSync(this: BarSceneContext, payload: { balls: PoolBall[]; scratched: boolean }): void {
   this._network?.emitInteract(POOL_OBJECT_ID, 'pool-sync', {
     balls: serializePoolBalls(payload.balls),
     scratched: payload.scratched,
@@ -71,21 +72,21 @@ export function requestPoolSync(this: any, payload: { balls: PoolBall[]; scratch
   });
 }
 
-export function requestPoolPlaceCue(this: any, payload: { x: number; y: number }): void {
+export function requestPoolPlaceCue(this: BarSceneContext, payload: { x: number; y: number }): void {
   this._network?.emitInteract(POOL_OBJECT_ID, 'pool-place-cue', {
     ...payload,
     requestId: requestId('pool-place-cue'),
   });
 }
 
-export function requestPoolLeave(this: any): void {
+export function requestPoolLeave(this: BarSceneContext): void {
   this._network?.emitInteract(POOL_OBJECT_ID, 'pool-leave');
   const store = useGameStore.getState();
   store.setPoolMessage(null);
   store.setShowPoolOverlay(false);
 }
 
-export function applyPoolState(this: any, rawState: unknown): void {
+export function applyPoolState(this: BarSceneContext, rawState: unknown): void {
   const state = normalizePoolState(rawState);
   this._poolState = state;
   const store = useGameStore.getState();
@@ -108,16 +109,16 @@ export function applyPoolState(this: any, rawState: unknown): void {
   }
 }
 
-export function isInPoolLocation(this: any): boolean {
+export function isInPoolLocation(this: BarSceneContext): boolean {
   return this._currentLocationId() === '0,0';
 }
 
-export function showPoolMessage(this: any, message: string, tone: 'info' | 'error'): void {
+export function showPoolMessage(this: BarSceneContext, message: string, tone: 'info' | 'error'): void {
   useGameStore.getState().setPoolMessage({ text: message, tone });
   this._showNotice(message);
 }
 
-export function syncPoolPositionForServer(this: any): { x: number; y: number } | null {
+export function syncPoolPositionForServer(this: BarSceneContext): { x: number; y: number } | null {
   const local = this._localPosition();
   if (!local) return null;
   this._network?.emitMove(local.x, local.y, Direction.SE, 'idle', true);

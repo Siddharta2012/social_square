@@ -2,8 +2,9 @@ import { POOL_PLAY_COST } from '@social-square/shared';
 import { eventBus } from '../../../eventBus';
 import { useGameStore } from '../../../store/gameStore';
 import { PETAL_ACTION_COST } from '../../../world/interactions';
+import type { BarSceneContext } from './barSceneContext';
 
-export function onShutdown(this: any): void {
+export function onShutdown(this: BarSceneContext): void {
   eventBus.off('exit-room');
   eventBus.off('voice-toggle');
   eventBus.off('audio-input-change');

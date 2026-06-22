@@ -9,12 +9,13 @@ import {
 import { t } from '../../../i18n';
 import { useGameStore } from '../../../store/gameStore';
 import { JUKEBOX_OBJECT_ID, JUKEBOX_POSITION } from '../../../world/interactions';
+import type { BarSceneContext } from './barSceneContext';
 
 function requestId(prefix: string): string {
   return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}:${Math.random().toString(36).slice(2)}`}`;
 }
 
-export function requestJukeboxToggle(this: any): void {
+export function requestJukeboxToggle(this: BarSceneContext): void {
   if (!this._isInJukeboxLocation()) {
     this._showNotice(t('jukebox.available'));
     return;
@@ -41,7 +42,7 @@ export function requestJukeboxToggle(this: any): void {
   });
 }
 
-export function requestJukeboxNext(this: any): void {
+export function requestJukeboxNext(this: BarSceneContext): void {
   if (!this._isInJukeboxLocation()) {
     this._showNotice(t('jukebox.available'));
     return;
@@ -68,7 +69,7 @@ export function requestJukeboxNext(this: any): void {
   });
 }
 
-export function requestJukeboxPlayUrl(this: any, url: string): void {
+export function requestJukeboxPlayUrl(this: BarSceneContext, url: string): void {
   if (!this._isInJukeboxLocation()) {
     this._showNotice(t('jukebox.available'));
     return;
@@ -102,7 +103,7 @@ export function requestJukeboxPlayUrl(this: any, url: string): void {
   });
 }
 
-export async function applyJukeboxState(this: any, rawState: unknown): Promise<void> {
+export async function applyJukeboxState(this: BarSceneContext, rawState: unknown): Promise<void> {
   const state = normalizeJukeboxState(rawState);
   this._jukeboxState = state;
   if (!this._isInJukeboxLocation()) {
@@ -127,18 +128,18 @@ export async function applyJukeboxState(this: any, rawState: unknown): Promise<v
   if (result.blocked) this._showNotice(t('jukebox.blocked'));
 }
 
-export function isInJukeboxLocation(this: any): boolean {
+export function isInJukeboxLocation(this: BarSceneContext): boolean {
   return this._currentLocationId() === '0,0';
 }
 
-export function syncJukeboxForLocation(this: any): void {
+export function syncJukeboxForLocation(this: BarSceneContext): void {
   if (this._isInJukeboxLocation()) return;
   this._jukebox.setSpatial(0, 0);
   void this._jukebox.applyState({ ...this._jukeboxState, playing: false });
   useGameStore.getState().setJukeboxStatus(null);
 }
 
-export function syncJukeboxSpatial(this: any): void {
+export function syncJukeboxSpatial(this: BarSceneContext): void {
   if (!this._jukeboxState.playing || !this._isInJukeboxLocation()) return;
   const local = this._localPosition();
   if (!local) return;
@@ -146,7 +147,7 @@ export function syncJukeboxSpatial(this: any): void {
   this._jukebox.setSpatial(spatial.volume, spatial.pan);
 }
 
-export function syncJukeboxExpiry(this: any): void {
+export function syncJukeboxExpiry(this: BarSceneContext): void {
   if (!this._jukeboxState.playing) return;
   const normalized = normalizeJukeboxState(this._jukeboxState);
   if (normalized.playing) return;
@@ -154,7 +155,7 @@ export function syncJukeboxExpiry(this: any): void {
   void this._applyJukeboxState(normalized);
 }
 
-export function syncJukeboxPositionForServer(this: any): Position | null {
+export function syncJukeboxPositionForServer(this: BarSceneContext): Position | null {
   const local = this._localPosition();
   if (!local) return null;
   this._network?.emitMove(

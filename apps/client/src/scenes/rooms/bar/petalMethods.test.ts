@@ -15,6 +15,7 @@ import {
   type PetalBloom,
 } from './petalMethods';
 import { PETAL_AUTO_COLLECT_CHECK_MS } from './timing';
+import type { BarSceneContext } from './barSceneContext';
 
 vi.mock('../../../entities/InteractStation', () => ({
   InteractStation: class {
@@ -58,10 +59,10 @@ function petalContext() {
       return total;
     },
     _acceptPetalServerTotal(petals: number) {
-      acceptPetalServerTotal.call(this, petals);
+      acceptPetalServerTotal.call(this as unknown as BarSceneContext, petals);
     },
     _removeOptimisticPetalCredit(pending: PendingPetalCollect) {
-      removeOptimisticPetalCredit.call(this, pending);
+      removeOptimisticPetalCredit.call(this as unknown as BarSceneContext, pending);
     },
     _removePetalBloom: vi.fn(),
     _spawnPetalCollectBurst: vi.fn(),
@@ -99,7 +100,7 @@ describe('petal collection timing', () => {
     );
     useGameStore.setState({ petals: 50 });
 
-    confirmPetalCollected.call(ctx, first, 25, 25, firstRequestId);
+    confirmPetalCollected.call(ctx as unknown as BarSceneContext, first, 25, 25, firstRequestId);
 
     expect(useGameStore.getState().petals).toBe(50);
     expect(ctx._pendingPetalCollects.has(firstRequestId)).toBe(false);
@@ -110,7 +111,7 @@ describe('petal collection timing', () => {
     const ctx = petalContext();
     useGameStore.setState({ petals: 75 });
 
-    acceptPetalServerTotal.call(ctx, 50);
+    acceptPetalServerTotal.call(ctx as unknown as BarSceneContext, 50);
 
     expect(useGameStore.getState().petals).toBe(75);
   });
@@ -125,7 +126,7 @@ describe('petal collection timing', () => {
     );
     useGameStore.setState({ petals: 25 });
 
-    sweepStalePetalCollects.call(ctx);
+    sweepStalePetalCollects.call(ctx as unknown as BarSceneContext);
 
     expect(useGameStore.getState().petals).toBe(25);
     expect(ctx._pendingPetalCollects.get(requestId)?.serverCheckTimedOut).toBe(true);
@@ -138,7 +139,7 @@ describe('petal collection timing', () => {
     ctx._pendingPetalCollects.set(requestId, pending(position, 25, Date.now(), requestId));
     useGameStore.setState({ petals: 25 });
 
-    rollbackPendingPetalCollect.call(ctx, requestId, 'Petali non validi');
+    rollbackPendingPetalCollect.call(ctx as unknown as BarSceneContext, requestId, 'Petali non validi');
 
     expect(useGameStore.getState().petals).toBe(0);
     expect(ctx._pendingPetalCollects.has(requestId)).toBe(false);
@@ -152,12 +153,12 @@ describe('petal collection timing', () => {
       station: { destroy: vi.fn() },
     } as unknown as PetalBloom;
 
-    collectPetalBloom.call(ctx, bloom);
+    collectPetalBloom.call(ctx as unknown as BarSceneContext, bloom);
     const firstPayload = ctx._network.emitInteract.mock.calls[0][2];
     const firstRequestId = firstPayload.requestId;
     ctx._pendingPetalCollects.clear();
     ctx._petalAttemptCooldowns.clear();
-    collectPetalBloom.call(ctx, bloom);
+    collectPetalBloom.call(ctx as unknown as BarSceneContext, bloom);
     const secondRequestId = ctx._network.emitInteract.mock.calls[1][2].requestId;
 
     expect(firstRequestId).not.toBe(petalPointKey(TEST_PETAL_POINT));
@@ -176,7 +177,7 @@ describe('petal collection timing', () => {
       Date.now() + PETAL_SPAWN_CONFIGS[TEST_LOCATION_ID].intervalMs,
     );
 
-    const spawned = spawnPetalBloom.call(ctx);
+    const spawned = spawnPetalBloom.call(ctx as unknown as BarSceneContext);
 
     expect(spawned).toBe(false);
     expect(ctx._petalBlooms.some((bloom) => petalPointKey(bloom.position) === pointKey)).toBe(

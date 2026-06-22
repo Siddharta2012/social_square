@@ -1,10 +1,11 @@
 import { useGameStore } from '../../../store/gameStore';
 import { useUserStore } from '../../../store/userStore';
 import type { Position } from '@social-square/shared';
+import type { BarSceneContext } from './barSceneContext';
 
 const VOICE_MUTE_STORAGE_KEY = 'social-square:voice-muted-users';
 
-export async function setupVoice(this: any): Promise<void> {
+export async function setupVoice(this: BarSceneContext): Promise<void> {
   const { token } = useUserStore.getState();
   if (!token) return;
   if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('novoice')) return;
@@ -22,7 +23,7 @@ export async function setupVoice(this: any): Promise<void> {
   await this._connectVoiceForCurrentLocation();
 }
 
-export async function connectVoiceForCurrentLocation(this: any): Promise<void> {
+export async function connectVoiceForCurrentLocation(this: BarSceneContext): Promise<void> {
   const { token } = useUserStore.getState();
   if (!token || !this._voice) return;
   if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('novoice')) return;
@@ -35,7 +36,7 @@ export async function connectVoiceForCurrentLocation(this: any): Promise<void> {
   this._syncVoiceSpatial(999);
 }
 
-export function syncVoiceSpatial(this: any, deltaMs: number): void {
+export function syncVoiceSpatial(this: BarSceneContext, deltaMs: number): void {
   this._voiceSpatialElapsed += deltaMs;
   if (this._voiceSpatialElapsed < 220) return;
   this._voiceSpatialElapsed = 0;
@@ -65,7 +66,7 @@ export function syncVoiceSpatial(this: any, deltaMs: number): void {
   this._setSpeakingUi(speakingUsers.slice(0, 4));
 }
 
-export function setRemoteVoiceMuted(this: any, userId: string, muted: boolean): void {
+export function setRemoteVoiceMuted(this: BarSceneContext, userId: string, muted: boolean): void {
   if (muted) this._mutedVoiceUsers.add(userId);
   else this._mutedVoiceUsers.delete(userId);
 
@@ -80,7 +81,7 @@ export function setRemoteVoiceMuted(this: any, userId: string, muted: boolean): 
   } : null);
 }
 
-export function onSpeakingChanged(this: any, userId: string, speaking: boolean): void {
+export function onSpeakingChanged(this: BarSceneContext, userId: string, speaking: boolean): void {
   if (userId === this._myUserId) {
     this.localAvatar?.setSpeaking(speaking);
     return;
@@ -108,7 +109,7 @@ export function spatialFrom(
   return { volume, pan, distance };
 }
 
-export function setSpeakingUi(this: any, users: Array<{ userId: string; username: string; distance: number; volume: number; pan: number }>): void {
+export function setSpeakingUi(this: BarSceneContext, users: Array<{ userId: string; username: string; distance: number; volume: number; pan: number }>): void {
   const key = users
     .map((user) => `${user.userId}:${Math.round(user.distance * 10)}:${Math.round(user.pan * 10)}`)
     .join('|');
@@ -117,7 +118,7 @@ export function setSpeakingUi(this: any, users: Array<{ userId: string; username
   useGameStore.getState().setSpeakingUsers(users);
 }
 
-export function loadMutedVoiceUsers(this: any): void {
+export function loadMutedVoiceUsers(this: BarSceneContext): void {
   try {
     const raw = localStorage.getItem(VOICE_MUTE_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -129,7 +130,7 @@ export function loadMutedVoiceUsers(this: any): void {
   }
 }
 
-export function saveMutedVoiceUsers(this: any): void {
+export function saveMutedVoiceUsers(this: BarSceneContext): void {
   try {
     localStorage.setItem(VOICE_MUTE_STORAGE_KEY, JSON.stringify([...this._mutedVoiceUsers]));
   } catch {

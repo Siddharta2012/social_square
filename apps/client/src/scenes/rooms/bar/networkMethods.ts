@@ -5,8 +5,9 @@ import { useGameStore } from '../../../store/gameStore';
 import { useUserStore } from '../../../store/userStore';
 import { NetworkSystem } from '../../../systems/NetworkSystem';
 import { applyAuthoritativeRoomState } from './roomStateReconciler';
+import type { BarSceneContext } from './barSceneContext';
 
-export function setupNetwork(this: any): void {
+export function setupNetwork(this: BarSceneContext): void {
   const { username = 'Player', token } = useUserStore.getState();
 
   this._network = new NetworkSystem();

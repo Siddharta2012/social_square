@@ -10,6 +10,7 @@ import {
 } from '../../../world/interactions';
 import { drawPetalBloom } from './stationIcons';
 import { PETAL_AUTO_COLLECT_CHECK_MS } from './timing';
+import type { BarSceneContext } from './barSceneContext';
 
 export interface PetalBloom {
   station: InteractStation;
@@ -39,20 +40,17 @@ export function petalCollectRequestId(pointKey: string): string {
 }
 
 function pendingPetalForPoint(
-  context: any,
+  context: BarSceneContext,
   pointKey: string,
 ): [string, PendingPetalCollect] | null {
-  for (const [requestId, pending] of context._pendingPetalCollects as Map<
-    string,
-    PendingPetalCollect
-  >) {
+  for (const [requestId, pending] of context._pendingPetalCollects) {
     if ((pending.pointKey ?? petalPointKey(pending.position)) === pointKey)
       return [requestId, pending];
   }
   return null;
 }
 
-export function startPetalSpawns(this: any): void {
+export function startPetalSpawns(this: BarSceneContext): void {
   this.time.delayedCall(1200, () => this._seedPetalBloomsForLocation());
 
   this._petalSpawnTimer = this.time.addEvent({
@@ -62,14 +60,14 @@ export function startPetalSpawns(this: any): void {
   });
 }
 
-export function seedPetalBloomsForLocation(this: any): void {
+export function seedPetalBloomsForLocation(this: BarSceneContext): void {
   const config = petalSpawnConfigForLocation(this._currentLocationId());
   if (!config) return;
   for (let i = 0; i < config.initialActive; i++) this._spawnPetalBloom();
   this._lastPetalSpawnByLocation.set(config.locationId, Date.now());
 }
 
-export function maybeSpawnPetalBloom(this: any): void {
+export function maybeSpawnPetalBloom(this: BarSceneContext): void {
   const locationId = this._currentLocationId();
   const config = petalSpawnConfigForLocation(locationId);
   if (!config) return;
@@ -78,7 +76,7 @@ export function maybeSpawnPetalBloom(this: any): void {
   if (this._spawnPetalBloom()) this._lastPetalSpawnByLocation.set(locationId, Date.now());
 }
 
-export function spawnPetalBloom(this: any): boolean {
+export function spawnPetalBloom(this: BarSceneContext): boolean {
   const config = petalSpawnConfigForLocation(this._currentLocationId());
   if (!config) return false;
   if (this._petalBlooms.length >= config.maxActive) return false;
@@ -106,7 +104,7 @@ export function spawnPetalBloom(this: any): boolean {
   return true;
 }
 
-export function createPetalBloom(this: any, position: Position, amount: number): PetalBloom {
+export function createPetalBloom(this: BarSceneContext, position: Position, amount: number): PetalBloom {
   const bloom = { position } as PetalBloom;
   const station = new InteractStation({
     scene: this,
@@ -124,7 +122,7 @@ export function createPetalBloom(this: any, position: Position, amount: number):
   return bloom;
 }
 
-export function sweepStalePetalCollects(this: any): void {
+export function sweepStalePetalCollects(this: BarSceneContext): void {
   const now = Date.now();
   for (const [key, until] of this._petalAttemptCooldowns as Map<string, number>) {
     if (until <= now && !pendingPetalForPoint(this, key)) this._petalAttemptCooldowns.delete(key);
@@ -137,7 +135,7 @@ export function sweepStalePetalCollects(this: any): void {
   }
 }
 
-export function collectNearbyPetals(this: any): void {
+export function collectNearbyPetals(this: BarSceneContext): void {
   const local = this._localPosition();
   if (!local || this._petalBlooms.length === 0) return;
 
@@ -152,7 +150,7 @@ export function collectNearbyPetals(this: any): void {
   }
 }
 
-export function collectPetalBloom(this: any, bloom: PetalBloom, automatic = false): void {
+export function collectPetalBloom(this: BarSceneContext, bloom: PetalBloom, automatic = false): void {
   if (!automatic && !this._isNear(bloom.position, PETAL_COLLECT_RADIUS_TILES)) {
     this._showNotice(t('petal.near'));
     return;
@@ -192,7 +190,7 @@ export function collectPetalBloom(this: any, bloom: PetalBloom, automatic = fals
 }
 
 export function confirmPetalCollected(
-  this: any,
+  this: BarSceneContext,
   position: Position,
   amount: number,
   petals: number,
@@ -220,12 +218,12 @@ export function confirmPetalCollected(
   this._syncLocalContext();
 }
 
-export function removePetalBloom(this: any, bloom: PetalBloom): void {
+export function removePetalBloom(this: BarSceneContext, bloom: PetalBloom): void {
   this._petalBlooms = this._petalBlooms.filter((candidate: PetalBloom) => candidate !== bloom);
   bloom.station.destroy();
 }
 
-export function syncPetalPositionForServer(this: any): Position | null {
+export function syncPetalPositionForServer(this: BarSceneContext): Position | null {
   const local = this._localPosition();
   if (!local) return null;
   this._network?.emitMove(
@@ -239,7 +237,7 @@ export function syncPetalPositionForServer(this: any): Position | null {
 }
 
 export function rollbackPendingPetalCollect(
-  this: any,
+  this: BarSceneContext,
   requestId: string | undefined,
   message: string,
 ): void {
@@ -263,40 +261,40 @@ export function rollbackPendingPetalCollect(
   this._showNotice(message);
 }
 
-export function rollbackLatestPendingPetalCollect(this: any, message: string): void {
+export function rollbackLatestPendingPetalCollect(this: BarSceneContext, message: string): void {
   const requestIds = Array.from(this._pendingPetalCollects.keys());
   const latestRequestId = requestIds[requestIds.length - 1];
   this._rollbackPendingPetalCollect(latestRequestId, message);
 }
 
-export function forgetLatestPendingPetalCollect(this: any): void {
+export function forgetLatestPendingPetalCollect(this: BarSceneContext): void {
   const requestIds = Array.from(this._pendingPetalCollects.keys());
   const latestRequestId = requestIds[requestIds.length - 1];
   if (latestRequestId) this._forgetPendingPetalCollect(latestRequestId);
 }
 
-export function forgetPendingPetalCollect(this: any, requestId: string): void {
+export function forgetPendingPetalCollect(this: BarSceneContext, requestId: string): void {
   const pending = this._pendingPetalCollects.get(requestId);
   this._pendingPetalCollects.delete(requestId);
   if (pending) this._removeOptimisticPetalCredit(pending);
 }
 
-export function removeOptimisticPetalCredit(this: any, pending: PendingPetalCollect): void {
+export function removeOptimisticPetalCredit(this: BarSceneContext, pending: PendingPetalCollect): void {
   if (pending.amount <= 0) return;
   useGameStore.getState().setPetals(useGameStore.getState().petals - pending.amount);
 }
 
-export function applyServerPetals(this: any, petals: number): void {
+export function applyServerPetals(this: BarSceneContext, petals: number): void {
   useGameStore.getState().setPetals(petals + this._pendingPetalValue());
 }
 
-export function acceptPetalServerTotal(this: any, petals: number): void {
+export function acceptPetalServerTotal(this: BarSceneContext, petals: number): void {
   const store = useGameStore.getState();
   const serverWithLocalPending = petals + this._pendingPetalValue();
   store.setPetals(Math.max(store.petals, serverWithLocalPending));
 }
 
-export function pendingPetalValue(this: any): number {
+export function pendingPetalValue(this: BarSceneContext): number {
   let total = 0;
   this._pendingPetalCollects.forEach((pending: PendingPetalCollect) => {
     total += pending.amount;
@@ -304,7 +302,7 @@ export function pendingPetalValue(this: any): number {
   return total;
 }
 
-export function spawnPetalCollectBurst(this: any, position: Position, amount: number): void {
+export function spawnPetalCollectBurst(this: BarSceneContext, position: Position, amount: number): void {
   const iso = IsometricSystem.worldToIso(position.x, position.y);
   const colors = [0xffd166, 0xe85d75, 0x9b7cff, 0xffffff, 0x88ffbb];
 
@@ -352,7 +350,7 @@ export function spawnPetalCollectBurst(this: any, position: Position, amount: nu
   });
 }
 
-export function playPetalCollectSound(this: any): void {
+export function playPetalCollectSound(this: BarSceneContext): void {
   const context = this._getPetalAudioContext();
   if (!context) return;
 
@@ -378,7 +376,7 @@ export function playPetalCollectSound(this: any): void {
   navigator.vibrate?.(18);
 }
 
-export function primePetalAudio(this: any): void {
+export function primePetalAudio(this: BarSceneContext): void {
   const context = this._getPetalAudioContext();
   if (context) void context.resume();
 }
@@ -396,7 +394,7 @@ export function getPetalAudioContext(): AudioContext | null {
   return context;
 }
 
-export function clearPetalBlooms(this: any): void {
+export function clearPetalBlooms(this: BarSceneContext): void {
   this._petalBlooms.forEach((bloom: PetalBloom) => bloom.station.destroy());
   this._petalBlooms = [];
   this._pendingPetalCollects.clear();

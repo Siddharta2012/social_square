@@ -3,12 +3,13 @@ import { RemoteAvatar } from '../../../entities/RemoteAvatar';
 import { t } from '../../../i18n';
 import { useGameStore } from '../../../store/gameStore';
 import type { OrderItemId, Position, WaiterState } from '@social-square/shared';
+import type { BarSceneContext } from './barSceneContext';
 
-export function waiterPosition(this: any): Position {
+export function waiterPosition(this: BarSceneContext): Position {
   return { x: this._waiterState.x, y: this._waiterState.y };
 }
 
-export function callWaiter(this: any): void {
+export function callWaiter(this: BarSceneContext): void {
   if (!this.localAvatar) return;
   if (!this._isInWaiterLocation()) {
     this._showNotice(t('waiter.available'));
@@ -25,7 +26,7 @@ export function callWaiter(this: any): void {
   });
 }
 
-export function placeWaiterOrder(this: any, item: OrderItemId): void {
+export function placeWaiterOrder(this: BarSceneContext, item: OrderItemId): void {
   if (!this._isInWaiterLocation()) {
     this._showNotice(t('waiter.ordersAtBar'));
     return;
@@ -42,7 +43,7 @@ export function placeWaiterOrder(this: any, item: OrderItemId): void {
   });
 }
 
-export function ensureWaiterAvatar(this: any, waiter: WaiterState): RemoteAvatar {
+export function ensureWaiterAvatar(this: BarSceneContext, waiter: WaiterState): RemoteAvatar {
   if (this._waiterAvatar) return this._waiterAvatar;
 
   const avatar = new RemoteAvatar({
@@ -56,14 +57,14 @@ export function ensureWaiterAvatar(this: any, waiter: WaiterState): RemoteAvatar
   return avatar;
 }
 
-export function destroyWaiterAvatar(this: any): void {
+export function destroyWaiterAvatar(this: BarSceneContext): void {
   if (!this._waiterAvatar) return;
   this.isoSystem.unregister(this._waiterAvatar);
   this._waiterAvatar.destroy();
   this._waiterAvatar = null;
 }
 
-export function applyWaiterState(this: any, rawState: unknown): void {
+export function applyWaiterState(this: BarSceneContext, rawState: unknown): void {
   const waiter = normalizeWaiterState(rawState);
   this._waiterState = waiter;
 
@@ -98,6 +99,6 @@ export function applyWaiterState(this: any, rawState: unknown): void {
   }
 }
 
-export function isInWaiterLocation(this: any): boolean {
+export function isInWaiterLocation(this: BarSceneContext): boolean {
   return this._currentLocationId() === '0,0';
 }
