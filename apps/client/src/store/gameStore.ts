@@ -17,11 +17,18 @@ export interface ActionAvailability {
   canAffordAction: boolean;
 }
 
+export interface UserActionMenu {
+  userId: string;
+  username: string;
+  muted: boolean;
+}
+
 interface GameState {
   isConnected: boolean;
   currentRoomId: string | null;
   roomName: string | null;
   locationName: string | null;
+  routeHint: string | null;
   usersInRoom: number;
   petals: number;
   showUsernameForm: boolean;
@@ -32,6 +39,7 @@ interface GameState {
   setCurrentRoom: (roomId: string | null) => void;
   setRoomName: (name: string | null) => void;
   setLocationName: (name: string | null) => void;
+  setRouteHint: (hint: string | null) => void;
   setUsersInRoom: (count: number) => void;
   addPetals: (amount: number) => void;
   spendPetals: (amount: number) => boolean;
@@ -56,6 +64,10 @@ interface GameState {
   setWaiterStatus: (status: WaiterState | null) => void;
   actionAvailability: ActionAvailability;
   setActionAvailability: (availability: ActionAvailability) => void;
+  showWorldMap: boolean;
+  setShowWorldMap: (show: boolean) => void;
+  userActionMenu: UserActionMenu | null;
+  setUserActionMenu: (menu: UserActionMenu | null) => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -63,6 +75,7 @@ export const useGameStore = create<GameState>((set) => ({
   currentRoomId: null,
   roomName: null,
   locationName: null,
+  routeHint: null,
   usersInRoom: 0,
   petals: 0,
   showUsernameForm: false,
@@ -73,6 +86,7 @@ export const useGameStore = create<GameState>((set) => ({
   setCurrentRoom: (roomId) => set({ currentRoomId: roomId }),
   setRoomName: (name) => set({ roomName: name }),
   setLocationName: (name) => set({ locationName: name }),
+  setRouteHint: (hint) => set({ routeHint: hint }),
   setUsersInRoom: (count) => set({ usersInRoom: count }),
   addPetals: (amount) => set((state) => ({
     petals: Math.max(0, state.petals + Math.max(0, Math.floor(amount))),
@@ -114,4 +128,8 @@ export const useGameStore = create<GameState>((set) => ({
     canAffordAction: false,
   },
   setActionAvailability: (availability) => set({ actionAvailability: availability }),
+  showWorldMap: false,
+  setShowWorldMap: (show) => set({ showWorldMap: show }),
+  userActionMenu: null,
+  setUserActionMenu: (menu) => set({ userActionMenu: menu }),
 }));

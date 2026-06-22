@@ -17,6 +17,10 @@ export class VoiceSystem {
   private _callbacks: VoiceCallbacks = {};
   private _muted = false;
   private _ready = false;
+  private _roomId: string | null = null;
+  private _remoteAudio = new Map<string, Set<HTMLMediaElement>>();
+  private _participantVolumes = new Map<string, number>();
+  private _participantMuted = new Set<string>();
 
   setCallbacks(cb: VoiceCallbacks): void {
     this._callbacks = cb;
@@ -24,9 +28,13 @@ export class VoiceSystem {
 
   get isReady(): boolean { return this._ready; }
   get isMuted(): boolean { return this._muted; }
+  get roomId(): string | null { return this._roomId; }
 
   /** Fetches a LiveKit token from our server and connects to the room. */
   async connect(authToken: string, roomId: string): Promise<void> {
+    if (this._room && this._roomId === roomId && this._ready) return;
+    await this.disconnect();
+
     try {
       const res = await fetch(`/api/voice/token?roomId=${encodeURIComponent(roomId)}`, {
         headers: { Authorization: `Bearer ${authToken}` },
@@ -52,8 +60,9 @@ export class VoiceSystem {
 
       this._setupRoomListeners();
       await this._room.connect(url, token);
-      await this._room.localParticipant.setMicrophoneEnabled(true);
+      await this._room.localParticipant.setMicrophoneEnabled(!this._muted);
       this._ready = true;
+      this._roomId = roomId;
       this._callbacks.onConnected?.();
     } catch (err) {
       this._callbacks.onError?.(err instanceof Error ? err : new Error(String(err)));
@@ -66,6 +75,21 @@ export class VoiceSystem {
     return this._muted;
   }
 
+  setParticipantMuted(userId: string, muted: boolean): void {
+    if (muted) this._participantMuted.add(userId);
+    else this._participantMuted.delete(userId);
+    this._applyParticipantAudio(userId);
+  }
+
+  isParticipantMuted(userId: string): boolean {
+    return this._participantMuted.has(userId);
+  }
+
+  setParticipantVolume(userId: string, volume: number): void {
+    this._participantVolumes.set(userId, Math.max(0, Math.min(1, volume)));
+    this._applyParticipantAudio(userId);
+  }
+
   async switchInputDevice(deviceId: string): Promise<void> {
     if (!this._room) return;
     await this._room.switchActiveDevice('audioinput', deviceId);
@@ -76,7 +100,21 @@ export class VoiceSystem {
       await this._room.disconnect();
       this._room = null;
     }
+    this._remoteAudio.forEach((elements) => elements.forEach((el) => el.remove()));
+    this._remoteAudio.clear();
     this._ready = false;
+    this._roomId = null;
+  }
+
+  private _applyParticipantAudio(userId: string): void {
+    const elements = this._remoteAudio.get(userId);
+    if (!elements) return;
+    const muted = this._participantMuted.has(userId);
+    const volume = this._participantVolumes.get(userId) ?? 1;
+    elements.forEach((el) => {
+      el.muted = muted || volume <= 0;
+      el.volume = muted ? 0 : volume;
+    });
   }
 
   private _setupRoomListeners(): void {
@@ -96,16 +134,26 @@ export class VoiceSystem {
       }
     });
 
-    this._room.on(RoomEvent.TrackSubscribed, (track, _pub, _participant) => {
+    this._room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
       if (track.kind === Track.Kind.Audio) {
         const el = track.attach();
-        el.volume = 1;
+        el.autoplay = true;
+        const userId = participant.identity;
+        const elements = this._remoteAudio.get(userId) ?? new Set<HTMLMediaElement>();
+        elements.add(el);
+        this._remoteAudio.set(userId, elements);
+        this._applyParticipantAudio(userId);
         document.body.appendChild(el);
       }
     });
 
-    this._room.on(RoomEvent.TrackUnsubscribed, (track) => {
-      track.detach().forEach((el) => el.remove());
+    this._room.on(RoomEvent.TrackUnsubscribed, (track, _pub, participant) => {
+      const userId = participant.identity;
+      track.detach().forEach((el) => {
+        this._remoteAudio.get(userId)?.delete(el);
+        el.remove();
+      });
+      if (this._remoteAudio.get(userId)?.size === 0) this._remoteAudio.delete(userId);
     });
 
     this._room.on(RoomEvent.ConnectionStateChanged, (state) => {

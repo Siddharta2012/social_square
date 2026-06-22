@@ -14,6 +14,11 @@ const game = new Phaser.Game({
   scene: [BootScene, MenuScene, TestRoomScene, BarScene],
 });
 
+// Dev-only: expose the game instance for headless tooling (screenshots, scene control).
+if (import.meta.env.DEV) {
+  (window as unknown as { __game?: Phaser.Game }).__game = game;
+}
+
 const hudRoot = document.getElementById('hud-root');
 if (hudRoot) {
   const root = createRoot(hudRoot);

@@ -7,6 +7,7 @@ import { AuthForm } from './AuthForm';
 import { VoiceControls } from './VoiceControls';
 import { AudioSettingsModal } from './AudioSettingsModal';
 import { eventBus } from '../eventBus';
+import { fastTravelLocations } from '../world/locations';
 
 export const HUD: React.FC = () => {
   const showAuthForm = useGameStore((s) => s.showAuthForm);
@@ -17,6 +18,7 @@ export const HUD: React.FC = () => {
   const currentRoomId = useGameStore((s) => s.currentRoomId);
   const roomName = useGameStore((s) => s.roomName);
   const locationName = useGameStore((s) => s.locationName);
+  const routeHint = useGameStore((s) => s.routeHint);
   const usersInRoom = useGameStore((s) => s.usersInRoom);
   const petals = useGameStore((s) => s.petals);
   const voiceAvailable = useGameStore((s) => s.voiceAvailable);
@@ -29,12 +31,17 @@ export const HUD: React.FC = () => {
   const chatMessages = useGameStore((s) => s.chatMessages);
   const waiterStatus = useGameStore((s) => s.waiterStatus);
   const actionAvailability = useGameStore((s) => s.actionAvailability);
+  const showWorldMap = useGameStore((s) => s.showWorldMap);
+  const setShowWorldMap = useGameStore((s) => s.setShowWorldMap);
+  const userActionMenu = useGameStore((s) => s.userActionMenu);
+  const setUserActionMenu = useGameStore((s) => s.setUserActionMenu);
   const userId = useUserStore((s) => s.userId);
   const username = useUserStore((s) => s.username);
   const setUser = useUserStore((s) => s.setUser);
   const [chatDraft, setChatDraft] = useState('');
 
   const inRoom = currentRoomId !== null;
+  const travelOptions = fastTravelLocations();
 
   const handleAuthSuccess = (userId: string, uname: string, token: string) => {
     setUser(userId, uname, token);
@@ -140,8 +147,8 @@ export const HUD: React.FC = () => {
             <span style={{ color: '#fff4d0', fontSize: '13px', fontWeight: 700 }}>
               {locationName ?? roomName}
             </span>
-            <span style={{ color: '#7777aa', fontSize: '9px' }}>
-              location
+            <span style={{ color: routeHint ? '#88ffbb' : '#7777aa', fontSize: '9px' }}>
+              {routeHint ?? 'location'}
             </span>
           </div>
         )}
@@ -229,6 +236,9 @@ export const HUD: React.FC = () => {
               <button style={smallButtonStyle} onClick={() => emitEmote('wave')}>Saluta</button>
               <button style={smallButtonStyle} onClick={() => emitEmote('dance')}>Balla</button>
               <button style={smallButtonStyle} onClick={() => emitEmote('clap')}>Applauso</button>
+              <button style={smallButtonStyle} onClick={() => setShowWorldMap(!showWorldMap)}>
+                Mappa
+              </button>
               <button
                 style={{
                   ...smallButtonStyle,
@@ -295,6 +305,92 @@ export const HUD: React.FC = () => {
               Esci
             </button>
           </div>
+        </div>
+      )}
+
+      {inRoom && showWorldMap && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 140,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(6,8,18,0.72)',
+          pointerEvents: 'auto',
+        }}>
+          <div style={{
+            width: 'min(620px, calc(100vw - 32px))',
+            background: 'rgba(12,14,34,0.96)',
+            border: '1px solid rgba(150,150,255,0.32)',
+            borderRadius: '6px',
+            padding: '14px',
+            boxShadow: '0 18px 40px rgba(0,0,0,0.35)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ color: '#fff4d0', fontSize: '14px', fontWeight: 700 }}>
+                Mappa paese
+              </span>
+              <button style={smallButtonStyle} onClick={() => setShowWorldMap(false)}>
+                Chiudi
+              </button>
+            </div>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+              gap: '8px',
+            }}>
+              {travelOptions.map((location) => (
+                <button
+                  key={location.id}
+                  style={{
+                    ...smallButtonStyle,
+                    height: '44px',
+                    textAlign: 'left',
+                    color: location.name === locationName ? '#ffe14d' : '#aaaaff',
+                    borderColor: location.name === locationName ? 'rgba(255,225,77,0.5)' : 'rgba(150,150,255,0.35)',
+                  }}
+                  onClick={() => {
+                    setShowWorldMap(false);
+                    eventBus.emit('fast-travel', location.id);
+                  }}
+                >
+                  {location.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {inRoom && userActionMenu && (
+        <div style={{
+          position: 'absolute',
+          right: '16px',
+          top: '54px',
+          zIndex: 145,
+          background: 'rgba(10,10,30,0.94)',
+          border: '1px solid rgba(150,150,255,0.32)',
+          borderRadius: '6px',
+          padding: '9px',
+          display: 'flex',
+          gap: '8px',
+          alignItems: 'center',
+          pointerEvents: 'auto',
+          boxShadow: '0 10px 24px rgba(0,0,0,0.3)',
+        }}>
+          <span style={{ color: '#fff4d0', fontSize: '11px', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {userActionMenu.username}
+          </span>
+          <button
+            style={smallButtonStyle}
+            onClick={() => eventBus.emit('voice-user-mute', userActionMenu.userId, !userActionMenu.muted)}
+          >
+            {userActionMenu.muted ? 'Togli muto' : 'Muta'}
+          </button>
+          <button style={smallButtonStyle} onClick={() => setUserActionMenu(null)}>
+            Chiudi
+          </button>
         </div>
       )}
 

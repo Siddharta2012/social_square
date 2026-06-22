@@ -1,4 +1,4 @@
-import { computeActiveSet, globalToSector, sectorKey } from './coords';
+import { globalToSector, sectorKey } from './coords';
 import type { SectorLoader } from './SectorLoader';
 import type { WorldMap } from './WorldMap';
 import type { SectorData } from './types';
@@ -11,9 +11,7 @@ export interface WorldStreamerCallbacks {
   onLoadingChange?: (state: LoadingState) => void;
 }
 
-const RADIUS = 1;
-
-/** Keeps the WorldMap populated with the sectors around the player. */
+/** Keeps the WorldMap populated with exactly the current screen/location. */
 export class WorldStreamer {
   private _activeKeys = new Set<string>();
   private _loadedKeys = new Set<string>();
@@ -30,7 +28,7 @@ export class WorldStreamer {
   async update(playerTileX: number, playerTileY: number): Promise<void> {
     const centerSx = globalToSector(playerTileX);
     const centerSy = globalToSector(playerTileY);
-    const nextActive = new Set(computeActiveSet(centerSx, centerSy, RADIUS));
+    const nextActive = new Set([sectorKey(centerSx, centerSy)]);
 
     const keysToUnload = [...this._loadedKeys].filter((key) => !nextActive.has(key));
     for (const key of keysToUnload) {
@@ -52,7 +50,7 @@ export class WorldStreamer {
 
     this.callbacks.onLoadingChange?.(this._initialized ? 'streaming' : 'initial');
 
-    await Promise.all(keysToLoad.map((key) => this._loadKey(key)));
+    for (const key of keysToLoad) await this._loadKey(key);
 
     this._initialized = true;
     this.callbacks.onLoadingChange?.(null);

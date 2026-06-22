@@ -24,14 +24,15 @@ describe('interest management helpers', () => {
     expect(sectorDistance({ sx: 0, sy: 0 }, { sx: 2, sy: 1 })).toBe(2);
   });
 
-  it('matches positions in the current sector and surrounding ring', () => {
-    expect(isPositionInInterestRange({ x: 9, y: 14 }, { x: 34, y: 25 })).toBe(true);
+  it('matches positions only in the current location sector by default', () => {
+    expect(isPositionInInterestRange({ x: 9, y: 14 }, { x: 10, y: 16 })).toBe(true);
+    expect(isPositionInInterestRange({ x: 9, y: 14 }, { x: 34, y: 25 })).toBe(false);
     expect(isPositionInInterestRange({ x: 9, y: 14 }, { x: 60, y: 14 })).toBe(false);
   });
 
   it('filters visible users while preserving the viewer', () => {
     const viewer = { userId: 'a', position: { x: 9, y: 14 } };
-    const nearby = { userId: 'b', position: { x: 35, y: 26 } };
+    const nearby = { userId: 'b', position: { x: 10, y: 16 } };
     const far = { userId: 'c', position: { x: 70, y: 14 } };
 
     expect(filterUsersByInterest(viewer, [far, nearby, viewer])).toEqual([nearby, viewer]);

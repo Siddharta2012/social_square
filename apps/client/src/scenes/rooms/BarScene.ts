@@ -43,42 +43,51 @@ import {
   isWithinInteractionRange,
   type SeatDefinition,
 } from '../../world/interactions';
-import { locationForPosition } from '../../world/locations';
+import {
+  exitsForLocation,
+  locationForId,
+  locationForPosition,
+  locationIdForPosition,
+  targetName,
+  type LocationExit,
+  type LocationId,
+} from '../../world/locations';
 import { BaseRoomScene, type WorldConfig } from './BaseRoomScene';
 
 // ─── Station icon drawing ──────────────────────────────────────────────────────
-// All icons drawn centered on (0,0); base sits ~y=-8 to rest on the raised counter.
+// All icons drawn centered on (0,0); base sits ~y=-26 to rest on the counter top
+// (the counter surface is at roughly y=-26; lower values would land on the front face).
 
 function drawBeerTap(g: Phaser.GameObjects.Graphics): void {
   // Metal base
   g.fillStyle(0x2b2b30, 1);
-  g.fillRoundedRect(-7, -14, 14, 8, 2);
+  g.fillRoundedRect(-7, -32, 14, 8, 2);
   // Column
   g.fillStyle(0xcfcfd8, 1);
-  g.fillRect(-3, -30, 6, 18);
+  g.fillRect(-3, -48, 6, 18);
   g.lineStyle(1, 0x000000, 0.25);
-  g.strokeRect(-3, -30, 6, 18);
+  g.strokeRect(-3, -48, 6, 18);
   // Spout
   g.fillStyle(0xcfcfd8, 1);
-  g.fillRect(-3, -30, 11, 4);
-  g.fillRect(5, -30, 4, 8);
+  g.fillRect(-3, -48, 11, 4);
+  g.fillRect(5, -48, 4, 8);
   // Handle knob
   g.fillStyle(0x111111, 1);
-  g.fillRect(-1.5, -38, 3, 8);
+  g.fillRect(-1.5, -56, 3, 8);
   g.fillStyle(0xff4d4d, 1);
-  g.fillCircle(0, -38, 3.5);
+  g.fillCircle(0, -56, 3.5);
   g.fillStyle(0xffffff, 0.4);
-  g.fillCircle(-1, -39, 1);
+  g.fillCircle(-1, -57, 1);
 }
 
 function drawPretzelStand(g: Phaser.GameObjects.Graphics): void {
   // Board / tray
   g.fillStyle(0x6b3a2a, 1);
-  g.fillRoundedRect(-12, -12, 24, 7, 2);
+  g.fillRoundedRect(-12, -30, 24, 7, 2);
   g.lineStyle(1, 0x000000, 0.3);
-  g.strokeRoundedRect(-12, -12, 24, 7, 2);
+  g.strokeRoundedRect(-12, -30, 24, 7, 2);
   // Two pretzels stacked
-  for (const [ox, oy] of [[-5, -16], [5, -18]] as [number, number][]) {
+  for (const [ox, oy] of [[-5, -34], [5, -36]] as [number, number][]) {
     g.lineStyle(3, 0x8a4b1e, 1);
     g.strokeCircle(ox - 2.5, oy, 3.5);
     g.strokeCircle(ox + 2.5, oy, 3.5);
@@ -128,6 +137,22 @@ function drawHotspot(_g: Phaser.GameObjects.Graphics): void {
   _g.fillRect(-32, -56, 64, 56);
 }
 
+function drawExitMarker(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(0x000000, 0.2);
+  g.fillEllipse(0, 3, 58, 18);
+  g.fillStyle(0x44ff88, 0.28);
+  g.fillEllipse(0, -2, 48, 15);
+  g.lineStyle(2, 0x44ff88, 0.9);
+  g.strokeEllipse(0, -2, 50, 17);
+  g.fillStyle(0x44ff88, 0.95);
+  g.fillTriangle(-10, -12, 10, -2, -10, 8);
+  g.fillRect(-16, -5, 18, 6);
+  g.fillStyle(0xffffff, 0.65);
+  g.fillCircle(12, -8, 2);
+  g.fillCircle(18, -2, 2);
+  g.fillCircle(12, 4, 2);
+}
+
 interface PetalBloom {
   station: InteractStation;
   position: Position;
@@ -149,10 +174,11 @@ const PETAL_SPAWN_POINTS: Position[] = [
 
 export class BarScene extends BaseRoomScene {
   private _network!: NetworkSystem;
-  private _voice!: VoiceSystem;
+  private _voice: VoiceSystem | null = null;
   private _remoteAvatars = new Map<string, RemoteAvatar>();
   private _myUserId: string | null = null;
   private _stations: InteractStation[] = [];
+  private _exitStations: InteractStation[] = [];
   private _petalBlooms: PetalBloom[] = [];
   private _petalSpawnTimer: Phaser.Time.TimerEvent | null = null;
   private _sipsLeft = 0;
@@ -166,9 +192,17 @@ export class BarScene extends BaseRoomScene {
   private _waiterState: WaiterState = normalizeWaiterState(null);
   private _deliveredOrderIds = new Set<string>();
   private _lastLocalContextKey = '';
+  private _pendingExit: LocationExit | null = null;
+  private _lastTravelAt = 0;
+  private _voiceConnectSeq = 0;
+  private _voiceSpatialElapsed = 0;
+  private _mutedVoiceUsers = new Set<string>();
 
   private static readonly BEER_SIPS = 3;
   private static readonly PRETZEL_BITES = 2;
+  // Counter fixtures must render above every counter piece (max depth ≈ 8 at x=8,y=0)
+  // yet below the far bottle shelves; a fixed depth clears the whole counter row.
+  private static readonly COUNTER_FIXTURE_DEPTH = 8.6;
 
   constructor() {
     super('BarScene');
@@ -214,7 +248,7 @@ export class BarScene extends BaseRoomScene {
 
     eventBus.on('exit-room', () => this.scene.start('MenuScene'), this);
     eventBus.on('voice-toggle', () => {
-      const muted = this._voice.toggleMute();
+      const muted = this._voice?.toggleMute() ?? useGameStore.getState().voiceMuted;
       useGameStore.getState().setVoiceMuted(muted);
     }, this);
     eventBus.on('audio-input-change', (deviceId: string) => {
@@ -227,10 +261,18 @@ export class BarScene extends BaseRoomScene {
     eventBus.on('chat-send', (text: string) => this._sendChatMessage(text), this);
     eventBus.on('waiter-call', () => this._callWaiter(), this);
     eventBus.on('waiter-order', (item: OrderItemId) => this._placeWaiterOrder(item), this);
+    eventBus.on('fast-travel', (locationId: LocationId) => this._fastTravel(locationId), this);
+    eventBus.on('voice-user-mute', (userId: string, muted: boolean) => this._setRemoteVoiceMuted(userId, muted), this);
     useGameStore.getState().clearChatMessages();
 
     this._createStations();
+    this._rebuildExitStations();
     this._startPetalSpawns();
+
+    // Spawn the waiter at its idle pose up front so it's always visible. The server
+    // only broadcasts the waiter (interest-scoped) once a customer summons it, so
+    // without this the bar would look unstaffed until an order is placed.
+    this._applyWaiterState(null);
 
     // Drink / eat held item
     this.input.keyboard?.on('keydown-B', () => this._consume());
@@ -238,6 +280,10 @@ export class BarScene extends BaseRoomScene {
     this.input.keyboard?.on('keydown-TWO', () => this._triggerEmote('dance'));
     this.input.keyboard?.on('keydown-THREE', () => this._triggerEmote('clap'));
     this.input.keyboard?.on('keydown-J', () => this._requestJukeboxToggle());
+    this.input.keyboard?.on('keydown-M', () => {
+      const store = useGameStore.getState();
+      store.setShowWorldMap(!store.showWorldMap);
+    });
 
     this.events.on(Phaser.Scenes.Events.SHUTDOWN, this._onShutdown, this);
   }
@@ -247,7 +293,10 @@ export class BarScene extends BaseRoomScene {
     this._remoteAvatars.forEach((avatar) => avatar.tick());
     this._waiterAvatar?.tick();
     this._updatePendingSeat();
+    this._updatePendingExit();
+    this._checkExitTileTravel();
     this._syncLocalContext();
+    this._syncVoiceSpatial(delta);
   }
 
   // ── Interactive stations ────────────────────────────────────────────────────
@@ -257,7 +306,9 @@ export class BarScene extends BaseRoomScene {
       scene: this, worldX: 2, worldY: 0,
       label: `Spillatore - ${PETAL_ACTION_COST} petali`,
       draw: drawBeerTap,
-      hitWidth: 26, hitHeight: 42,
+      hitWidth: 26, hitHeight: 60,
+      depth: BarScene.COUNTER_FIXTURE_DEPTH,
+      ambientGlow: true,
       onInteract: () => this._pickUpFromStation('beer', { x: 2, y: 0 }),
     }));
 
@@ -265,7 +316,9 @@ export class BarScene extends BaseRoomScene {
       scene: this, worldX: 6, worldY: 0,
       label: `Pretzel - ${PETAL_ACTION_COST} petali`,
       draw: drawPretzelStand,
-      hitWidth: 30, hitHeight: 30,
+      hitWidth: 30, hitHeight: 44,
+      depth: BarScene.COUNTER_FIXTURE_DEPTH,
+      ambientGlow: true,
       onInteract: () => this._pickUpFromStation('pretzel', { x: 6, y: 0 }),
     }));
 
@@ -354,11 +407,14 @@ export class BarScene extends BaseRoomScene {
     const nearWaiter = this._isNear(this._waiterPosition());
     const store = useGameStore.getState();
     const canAffordAction = store.petals >= PETAL_ACTION_COST;
-    const key = `${location}|${nearJukebox ? 1 : 0}|${nearWaiter ? 1 : 0}|${canAffordAction ? 1 : 0}`;
+    const nearbyExit = this._nearestExit(local);
+    const routeHint = nearbyExit ? `Verso ${targetName(nearbyExit)}` : null;
+    const key = `${location}|${nearJukebox ? 1 : 0}|${nearWaiter ? 1 : 0}|${canAffordAction ? 1 : 0}|${routeHint ?? ''}`;
     if (key === this._lastLocalContextKey) return;
 
     this._lastLocalContextKey = key;
     store.setLocationName(location);
+    store.setRouteHint(routeHint);
     store.setActionAvailability({ nearJukebox, nearWaiter, canAffordAction });
   }
 
@@ -400,7 +456,7 @@ export class BarScene extends BaseRoomScene {
       ));
       if (occupied) return false;
       const tile = this.worldMap.getTile(Math.round(point.x), Math.round(point.y));
-      return tile?.walkable !== false;
+      return tile?.walkable === true;
     });
     if (available.length === 0) return;
 
@@ -433,6 +489,121 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().addPetals(PETAL_BLOOM_VALUE);
     this._showNotice(`+${PETAL_BLOOM_VALUE} petali`);
     this._syncLocalContext();
+  }
+
+  private _currentLocationId(): LocationId | string {
+    const local = this._localPosition();
+    return local ? locationIdForPosition(local) : '0,0';
+  }
+
+  private _rebuildExitStations(): void {
+    this._exitStations.forEach((station) => station.destroy());
+    this._exitStations = [];
+
+    for (const exit of exitsForLocation(this._currentLocationId())) {
+      this._exitStations.push(new InteractStation({
+        scene: this,
+        worldX: exit.trigger.x,
+        worldY: exit.trigger.y,
+        label: `Verso ${targetName(exit)}`,
+        draw: drawExitMarker,
+        hitWidth: 62,
+        hitHeight: 38,
+        ambientGlow: true,
+        onInteract: () => this._beginExitTravel(exit),
+      }));
+    }
+  }
+
+  private _nearestExit(position: Position, radius = 4.25): LocationExit | null {
+    let best: { exit: LocationExit; distance: number } | null = null;
+    for (const exit of exitsForLocation(locationIdForPosition(position))) {
+      const dx = exit.trigger.x - position.x;
+      const dy = exit.trigger.y - position.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance > radius) continue;
+      if (!best || distance < best.distance) best = { exit, distance };
+    }
+    return best?.exit ?? null;
+  }
+
+  private _beginExitTravel(exit: LocationExit): void {
+    if (Date.now() - this._lastTravelAt < 500) return;
+    this._pendingExit = exit;
+    const local = this._localPosition();
+    if (local && isWithinInteractionRange(local, exit.trigger, 0.18)) {
+      void this._enterLocation(exit.targetId, exit.arrival);
+      return;
+    }
+
+    const started = this.movementSystem.moveTo(exit.trigger.x, exit.trigger.y);
+    this.setLocalAvatarState(null);
+    if (!started) {
+      this._pendingExit = null;
+      this._showNotice(`Non riesco a raggiungere ${targetName(exit)}`);
+    }
+  }
+
+  private _updatePendingExit(): void {
+    if (!this._pendingExit || this.movementSystem.isMoving) return;
+    const exit = this._pendingExit;
+    const local = this._localPosition();
+    if (!local || !isWithinInteractionRange(local, exit.trigger, 0.22)) return;
+    void this._enterLocation(exit.targetId, exit.arrival);
+  }
+
+  private _checkExitTileTravel(): void {
+    if (this._pendingExit || this.movementSystem.isMoving || Date.now() - this._lastTravelAt < 650) return;
+    const local = this._localPosition();
+    if (!local) return;
+    const exit = exitsForLocation(locationIdForPosition(local)).find((candidate) => (
+      isWithinInteractionRange(local, candidate.trigger, 0.22)
+    ));
+    if (exit) void this._enterLocation(exit.targetId, exit.arrival);
+  }
+
+  private _fastTravel(locationId: LocationId): void {
+    const location = locationForId(locationId);
+    if (!location) return;
+    void this._enterLocation(location.id, location.spawn);
+  }
+
+  private async _enterLocation(locationId: LocationId, position: Position): Promise<void> {
+    const location = locationForId(locationId);
+    if (!location) return;
+
+    this._pendingExit = null;
+    this._lastTravelAt = Date.now();
+    this._leaveSeat(true);
+    this.movementSystem.stopMovement();
+    this.setLocalAvatarTile(position.x, position.y, null);
+    this._network?.emitMove(position.x, position.y, Direction.SE, 'idle', true);
+    this._destroyAllRemotes();
+    this._clearPetalBlooms();
+    this._lastLocalContextKey = '';
+    useGameStore.getState().setLocationName(location.name);
+    useGameStore.getState().setRouteHint(null);
+    this._showNotice(location.name);
+
+    await this.refreshWorldAt(position.x, position.y);
+    this._rebuildExitStations();
+    this._syncLocalContext();
+    void this._connectVoiceForCurrentLocation();
+  }
+
+  private _destroyAllRemotes(): void {
+    this._remoteAvatars.forEach((avatar, userId) => {
+      this.isoSystem.unregister(avatar);
+      avatar.destroy();
+      this._voice?.setParticipantVolume(userId, 0);
+    });
+    this._remoteAvatars.clear();
+    useGameStore.getState().setUserActionMenu(null);
+  }
+
+  private _clearPetalBlooms(): void {
+    this._petalBlooms.forEach((bloom) => bloom.station.destroy());
+    this._petalBlooms = [];
   }
 
   private _beginSeatInteraction(seat: SeatDefinition): void {
@@ -788,15 +959,65 @@ export class BarScene extends BaseRoomScene {
   private async _setupVoice(): Promise<void> {
     const { token } = useUserStore.getState();
     if (!token) return;
+    // Dev escape hatch: skip voice so headless screenshot tooling can reach network idle.
+    if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('novoice')) return;
 
-    this._voice = new VoiceSystem();
-    this._voice.setCallbacks({
-      onConnected: () => useGameStore.getState().setVoiceAvailable(true),
-      onDisconnected: () => useGameStore.getState().setVoiceAvailable(false),
-      onSpeakingChanged: (userId, speaking) => this._onSpeakingChanged(userId, speaking),
+    if (!this._voice) {
+      this._voice = new VoiceSystem();
+      this._voice.setCallbacks({
+        onConnected: () => useGameStore.getState().setVoiceAvailable(true),
+        onDisconnected: () => useGameStore.getState().setVoiceAvailable(false),
+        onSpeakingChanged: (userId, speaking) => this._onSpeakingChanged(userId, speaking),
+      });
+    }
+
+    await this._connectVoiceForCurrentLocation();
+  }
+
+  private async _connectVoiceForCurrentLocation(): Promise<void> {
+    const { token } = useUserStore.getState();
+    if (!token || !this._voice) return;
+    if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('novoice')) return;
+
+    const voiceRoomId = `bar:${this._currentLocationId()}`;
+    const seq = ++this._voiceConnectSeq;
+    await this._voice.connect(token, voiceRoomId);
+    if (seq !== this._voiceConnectSeq) return;
+    this._mutedVoiceUsers.forEach((userId) => this._voice?.setParticipantMuted(userId, true));
+    this._syncVoiceSpatial(999);
+  }
+
+  private _syncVoiceSpatial(deltaMs: number): void {
+    if (!this._voice?.isReady) return;
+    this._voiceSpatialElapsed += deltaMs;
+    if (this._voiceSpatialElapsed < 220) return;
+    this._voiceSpatialElapsed = 0;
+
+    const local = this._localPosition();
+    if (!local) return;
+
+    this._remoteAvatars.forEach((avatar, userId) => {
+      const dx = avatar.worldX - local.x;
+      const dy = avatar.worldY - local.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const volume = distance <= 2
+        ? 1
+        : Math.max(0.12, 1 - ((distance - 2) / 15) * 0.88);
+      this._voice?.setParticipantVolume(userId, volume);
     });
+  }
 
-    await this._voice.connect(token, 'bar');
+  private _setRemoteVoiceMuted(userId: string, muted: boolean): void {
+    if (muted) this._mutedVoiceUsers.add(userId);
+    else this._mutedVoiceUsers.delete(userId);
+
+    this._voice?.setParticipantMuted(userId, muted);
+    const avatar = this._remoteAvatars.get(userId);
+    useGameStore.getState().setUserActionMenu(avatar ? {
+      userId,
+      username: avatar.username,
+      muted,
+    } : null);
   }
 
   private _onSpeakingChanged(userId: string, speaking: boolean): void {
@@ -820,10 +1041,44 @@ export class BarScene extends BaseRoomScene {
   ): void {
     if (this._remoteAvatars.has(userId)) return;
     const avatar = new RemoteAvatar({ scene: this, username, worldX, worldY });
+    this._attachRemoteInteractions(userId, username, avatar);
     if (heldItem) avatar.setHeldItem(heldItem);
     avatar.playAnimation(state);
     this._remoteAvatars.set(userId, avatar);
     this.isoSystem.register(avatar, worldX, worldY);
+    this._syncVoiceSpatial(999);
+  }
+
+  private _attachRemoteInteractions(userId: string, username: string, avatar: RemoteAvatar): void {
+    let timer: Phaser.Time.TimerEvent | null = null;
+
+    avatar.setData('interactable', true);
+    avatar.setSize(44, 68);
+    avatar.setInteractive(
+      new Phaser.Geom.Rectangle(-22, -64, 44, 68),
+      Phaser.Geom.Rectangle.Contains,
+    );
+
+    const clearTimer = () => {
+      timer?.remove(false);
+      timer = null;
+    };
+
+    avatar.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.button !== 0) return;
+      clearTimer();
+      timer = this.time.delayedCall(520, () => {
+        timer = null;
+        useGameStore.getState().setUserActionMenu({
+          userId,
+          username,
+          muted: this._mutedVoiceUsers.has(userId),
+        });
+      });
+    });
+    avatar.on('pointerup', clearTimer);
+    avatar.on('pointerout', clearTimer);
+    avatar.on('pointerupoutside', clearTimer);
   }
 
   private _destroyRemote(userId: string): void {
@@ -832,6 +1087,10 @@ export class BarScene extends BaseRoomScene {
     this.isoSystem.unregister(avatar);
     avatar.destroy();
     this._remoteAvatars.delete(userId);
+    this._voice?.setParticipantVolume(userId, 0);
+    if (useGameStore.getState().userActionMenu?.userId === userId) {
+      useGameStore.getState().setUserActionMenu(null);
+    }
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
@@ -847,11 +1106,14 @@ export class BarScene extends BaseRoomScene {
     eventBus.off('chat-send');
     eventBus.off('waiter-call');
     eventBus.off('waiter-order');
+    eventBus.off('fast-travel');
+    eventBus.off('voice-user-mute');
     this.input.keyboard?.off('keydown-B');
     this.input.keyboard?.off('keydown-ONE');
     this.input.keyboard?.off('keydown-TWO');
     this.input.keyboard?.off('keydown-THREE');
     this.input.keyboard?.off('keydown-J');
+    this.input.keyboard?.off('keydown-M');
     this._jukebox.destroy();
     this._network.leaveRoom('bar');
     this._network.disconnect();
@@ -864,6 +1126,8 @@ export class BarScene extends BaseRoomScene {
     this._petalSpawnTimer = null;
     this._petalBlooms.forEach((bloom) => bloom.station.destroy());
     this._petalBlooms = [];
+    this._exitStations.forEach((station) => station.destroy());
+    this._exitStations = [];
     this._stations.forEach((s) => s.destroy());
     this._stations = [];
     this._seatOccupants.clear();
@@ -878,6 +1142,9 @@ export class BarScene extends BaseRoomScene {
     useGameStore.getState().setCurrentRoom(null);
     useGameStore.getState().setRoomName(null);
     useGameStore.getState().setLocationName(null);
+    useGameStore.getState().setRouteHint(null);
+    useGameStore.getState().setShowWorldMap(false);
+    useGameStore.getState().setUserActionMenu(null);
     useGameStore.getState().setUsersInRoom(0);
     useGameStore.getState().setVoiceAvailable(false);
     useGameStore.getState().setVoiceMuted(false);

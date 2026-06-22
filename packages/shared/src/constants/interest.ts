@@ -5,8 +5,8 @@ import { WAITER_OBJECT_ID, normalizeWaiterState } from './waiter';
 /** Must match the client world sector size. */
 export const WORLD_SECTOR_SIZE = 24;
 
-/** Users receive presence updates for their own sector plus the surrounding ring. */
-export const INTEREST_RADIUS_SECTORS = 1;
+/** Users receive presence/audio context only for their current screen-sized location. */
+export const INTEREST_RADIUS_SECTORS = 0;
 
 export interface SectorCoordinate {
   sx: number;

@@ -12,10 +12,12 @@ const OBSTACLES: Array<[number, number]> = [
   [1, 0], [2, 0], [3, 0], [4, 0], [5, 0], [6, 0], [7, 0], [8, 0],
   [15, 0], [16, 0], [17, 0],
   [16, 3],
-  [4, 5], [5, 5],
-  [12, 5], [13, 5],
-  [4, 10], [5, 10],
-  [12, 10], [13, 10],
+  // Each bistro table is a single-tile obstacle matching its decoration.
+  // (The old two-tile footprint left an undecorated raised cube beside each table.)
+  [4, 5],
+  [12, 5],
+  [4, 10],
+  [12, 10],
 ];
 
 const DECORATIONS: DecorationData[] = [

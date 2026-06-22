@@ -17,6 +17,10 @@ export interface InteractStationOptions {
   draw: (g: Phaser.GameObjects.Graphics) => void;
   hitWidth?: number;
   hitHeight?: number;
+  /** Overrides the iso-derived depth (e.g. to render a fixture above the counter). */
+  depth?: number;
+  /** Shows a faint, always-on glow + slow pulse so the fixture is noticeable at rest. */
+  ambientGlow?: boolean;
   onInteract: () => void;
 }
 
@@ -24,6 +28,7 @@ export class InteractStation extends Phaser.GameObjects.Container {
   private _glow: Phaser.GameObjects.Graphics;
   private _label: Phaser.GameObjects.Container;
   private _glowTween: Phaser.Tweens.Tween | null = null;
+  private _ambient: Phaser.GameObjects.Graphics | null = null;
 
   constructor(opts: InteractStationOptions) {
     const iso = IsometricSystem.worldToIso(opts.worldX, opts.worldY);
@@ -31,6 +36,17 @@ export class InteractStation extends Phaser.GameObjects.Container {
 
     const w = opts.hitWidth ?? 30;
     const h = opts.hitHeight ?? 40;
+
+    // Ambient glow (always on, drawn furthest back) — marks the fixture at rest.
+    const ambientParts: Phaser.GameObjects.Graphics[] = [];
+    if (opts.ambientGlow) {
+      this._ambient = opts.scene.add.graphics();
+      this._ambient.fillStyle(0xffd67a, 0.16);
+      this._ambient.fillEllipse(0, -16, w + 8, h * 0.7);
+      this._ambient.fillStyle(0xffe14d, 0.1);
+      this._ambient.fillEllipse(0, -16, w + 22, h);
+      ambientParts.push(this._ambient);
+    }
 
     // Glow (hidden until hover) — drawn behind the icon
     this._glow = opts.scene.add.graphics();
@@ -48,11 +64,22 @@ export class InteractStation extends Phaser.GameObjects.Container {
     this._label = this._buildLabel(opts.scene, opts.label, -h - 6);
     this._label.setVisible(false);
 
-    this.add([this._glow, icon, this._label]);
+    this.add([...ambientParts, this._glow, icon, this._label]);
     opts.scene.add.existing(this);
 
-    this.setDepth(IsometricSystem.depth(opts.worldX, opts.worldY));
+    this.setDepth(opts.depth ?? IsometricSystem.depth(opts.worldX, opts.worldY));
     this.setData('interactable', true);
+
+    if (this._ambient) {
+      opts.scene.tweens.add({
+        targets: this._ambient,
+        alpha: { from: 0.55, to: 1 },
+        duration: 1500,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    }
 
     // Interactive hit area
     this.setSize(w, h);

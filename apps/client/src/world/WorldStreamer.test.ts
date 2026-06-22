@@ -18,20 +18,20 @@ function registryForAll(): SectorRegistry {
 }
 
 describe('WorldStreamer', () => {
-  it('loads the 3x3 ring around the starting tile', async () => {
+  it('loads only the current screen-sized location', async () => {
     const map = new WorldMap();
     const loader = new SectorLoader(registryForAll());
     const ready = vi.fn();
     const streamer = new WorldStreamer(map, loader, { onSectorReady: ready });
 
     await streamer.update(0, 0);
-    expect(ready).toHaveBeenCalledTimes(9);
+    expect(ready).toHaveBeenCalledTimes(1);
     expect(map.hasSector(0, 0)).toBe(true);
-    expect(map.hasSector(1, 1)).toBe(true);
-    expect(map.hasSector(-1, -1)).toBe(true);
+    expect(map.hasSector(1, 1)).toBe(false);
+    expect(map.hasSector(-1, -1)).toBe(false);
   });
 
-  it('unloads sectors that leave the active ring when the player moves', async () => {
+  it('unloads the previous location when the player changes screen', async () => {
     const map = new WorldMap();
     const loader = new SectorLoader(registryForAll());
     const unloaded = vi.fn();
@@ -40,7 +40,8 @@ describe('WorldStreamer', () => {
     await streamer.update(0, 0);
     await streamer.update(SECTOR_SIZE * 3, 0);
 
-    expect(map.hasSector(-1, -1)).toBe(false);
+    expect(map.hasSector(0, 0)).toBe(false);
+    expect(map.hasSector(3, 0)).toBe(true);
     expect(unloaded).toHaveBeenCalled();
   });
 

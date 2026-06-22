@@ -149,6 +149,10 @@ export abstract class BaseRoomScene extends Phaser.Scene {
     this.setLocalAvatarState(state);
   }
 
+  protected refreshWorldAt(x: number, y: number): Promise<void> {
+    return this._streamer.update(Math.round(x), Math.round(y));
+  }
+
   private _spawnAvatar(): void {
     const { spawnX, spawnY, username } = this._config;
 
