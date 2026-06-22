@@ -108,6 +108,9 @@ importers:
       ioredis:
         specifier: ^5.4.1
         version: 5.11.1
+      ioredis-mock:
+        specifier: ^8.13.1
+        version: 8.13.1(@types/ioredis-mock@8.2.7(ioredis@5.11.1))(ioredis@5.11.1)
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3
@@ -139,9 +142,6 @@ importers:
       '@types/pg':
         specifier: ^8.15.6
         version: 8.20.0
-      ioredis-mock:
-        specifier: ^8.13.1
-        version: 8.13.1(@types/ioredis-mock@8.2.7(ioredis@5.11.1))(ioredis@5.11.1)
       tsx:
         specifier: ^4.16.2
         version: 4.22.4
