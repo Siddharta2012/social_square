@@ -11,7 +11,10 @@ const pg = requireFromServer('pg');
 const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
-  console.error('[migrate] DATABASE_URL is required');
+  console.error('[migrate] DATABASE_URL is not set — cannot run migrations and the app cannot start.');
+  console.error('[migrate] Fix it on the SERVER service in Railway → Variables → New Variable:');
+  console.error('[migrate]     DATABASE_URL = ${{Postgres.DATABASE_URL}}');
+  console.error('[migrate] (replace "Postgres" with your database service name). Then redeploy.');
   process.exit(1);
 }
 
