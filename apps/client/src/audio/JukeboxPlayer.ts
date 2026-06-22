@@ -1,6 +1,7 @@
 import {
   JUKEBOX_TRACKS,
   normalizeJukeboxState,
+  youtubeEmbedUrl,
   type JukeboxState,
   type JukeboxTrackId,
 } from '@social-square/shared';
@@ -96,6 +97,9 @@ function wavBlob(samples: Float32Array): Blob {
 export class JukeboxPlayer {
   private _urls = new Map<JukeboxTrackId, string>();
   private _audio: HTMLAudioElement | null = null;
+  private _youtubeShell: HTMLDivElement | null = null;
+  private _youtubeFrame: HTMLIFrameElement | null = null;
+  private _youtubeVideoId: string | null = null;
   private _trackId: JukeboxTrackId | null = null;
 
   async applyState(state: JukeboxState): Promise<PlaybackResult> {
@@ -103,9 +107,17 @@ export class JukeboxPlayer {
 
     if (!next.playing) {
       this._audio?.pause();
+      this._hideExternalPlayer();
       return { played: false, blocked: false };
     }
 
+    if (next.externalTrack?.provider === 'youtube') {
+      this._audio?.pause();
+      this._showYouTubePlayer(next);
+      return { played: false, blocked: true };
+    }
+
+    this._hideExternalPlayer();
     const audio = this._ensureAudio(next.trackId);
     const duration = trackDurationSeconds(next.trackId);
     const elapsedSeconds = next.startedAt === null ? 0 : Math.max(0, (Date.now() - next.startedAt) / 1000);
@@ -136,6 +148,7 @@ export class JukeboxPlayer {
   destroy(): void {
     this._audio?.pause();
     this._audio = null;
+    this._hideExternalPlayer();
     for (const url of this._urls.values()) URL.revokeObjectURL(url);
     this._urls.clear();
     this._trackId = null;
@@ -160,5 +173,58 @@ export class JukeboxPlayer {
     const url = URL.createObjectURL(wavBlob(generateSamples(trackId)));
     this._urls.set(trackId, url);
     return url;
+  }
+
+  private _showYouTubePlayer(state: JukeboxState): void {
+    const videoId = state.externalTrack?.videoId;
+    if (!videoId) return;
+
+    const elapsedSeconds = state.startedAt === null ? 0 : Math.max(0, (Date.now() - state.startedAt) / 1000);
+    const src = youtubeEmbedUrl(videoId, elapsedSeconds, window.location.origin);
+    if (this._youtubeFrame && this._youtubeVideoId === videoId) {
+      this._youtubeFrame.src = src;
+      this._youtubeShell?.style.setProperty('display', 'block');
+      return;
+    }
+
+    this._hideExternalPlayer();
+
+    const shell = document.createElement('div');
+    shell.style.position = 'absolute';
+    shell.style.right = '16px';
+    shell.style.bottom = '88px';
+    shell.style.width = '320px';
+    shell.style.height = '200px';
+    shell.style.zIndex = '132';
+    shell.style.background = 'rgba(10,10,30,0.94)';
+    shell.style.border = '1px solid rgba(150,150,255,0.35)';
+    shell.style.borderRadius = '6px';
+    shell.style.overflow = 'hidden';
+    shell.style.boxShadow = '0 12px 32px rgba(0,0,0,0.36)';
+    shell.style.pointerEvents = 'auto';
+
+    const frame = document.createElement('iframe');
+    frame.src = src;
+    frame.title = state.externalTrack?.title ?? 'YouTube jukebox';
+    frame.width = '320';
+    frame.height = '200';
+    frame.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+    frame.allowFullscreen = true;
+    frame.style.width = '100%';
+    frame.style.height = '100%';
+    frame.style.border = '0';
+
+    shell.appendChild(frame);
+    document.body.appendChild(shell);
+    this._youtubeShell = shell;
+    this._youtubeFrame = frame;
+    this._youtubeVideoId = videoId;
+  }
+
+  private _hideExternalPlayer(): void {
+    this._youtubeFrame = null;
+    this._youtubeVideoId = null;
+    this._youtubeShell?.remove();
+    this._youtubeShell = null;
   }
 }

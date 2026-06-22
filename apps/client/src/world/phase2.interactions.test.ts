@@ -4,6 +4,8 @@ import {
   JUKEBOX_TRACKS,
   nextJukeboxTrackId,
   normalizeJukeboxState,
+  parseJukeboxExternalTrack,
+  parseYouTubeVideoId,
 } from '@social-square/shared';
 import { WorldMap } from './WorldMap';
 import {
@@ -44,10 +46,36 @@ describe('phase 2 interaction data', () => {
   it('normalizes unknown jukebox state to a safe stopped default', () => {
     expect(normalizeJukeboxState({ trackId: 'missing', playing: true }, 1000)).toEqual({
       trackId: DEFAULT_JUKEBOX_TRACK_ID,
+      externalTrack: undefined,
       playing: true,
       startedAt: null,
       updatedAt: 1000,
       requestedBy: undefined,
+    });
+  });
+
+  it('accepts only allowlisted YouTube jukebox links', () => {
+    expect(parseYouTubeVideoId('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
+    expect(parseYouTubeVideoId('https://youtu.be/dQw4w9WgXcQ?t=12')).toBe('dQw4w9WgXcQ');
+    expect(parseYouTubeVideoId('https://www.youtube.com/shorts/dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
+    expect(parseYouTubeVideoId('dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
+    expect(parseYouTubeVideoId('https://example.com/watch?v=dQw4w9WgXcQ')).toBeNull();
+  });
+
+  it('normalizes external jukebox media into safe metadata', () => {
+    const state = normalizeJukeboxState({
+      trackId: DEFAULT_JUKEBOX_TRACK_ID,
+      externalTrack: parseJukeboxExternalTrack('https://youtu.be/dQw4w9WgXcQ'),
+      playing: true,
+      startedAt: 1200,
+      updatedAt: 1300,
+    }, 1000);
+
+    expect(state.externalTrack).toEqual({
+      provider: 'youtube',
+      videoId: 'dQw4w9WgXcQ',
+      title: 'YouTube dQw4w9WgXcQ',
+      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
     });
   });
 });

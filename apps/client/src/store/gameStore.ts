@@ -9,6 +9,8 @@ export interface JukeboxStatus {
   title: string;
   playing: boolean;
   blocked: boolean;
+  source: 'local' | 'youtube';
+  externalUrl?: string;
 }
 
 export interface ActionAvailability {

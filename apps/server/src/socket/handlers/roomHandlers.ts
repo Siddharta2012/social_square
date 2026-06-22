@@ -19,6 +19,7 @@ import {
   normalizeChatText,
   normalizeJukeboxState,
   normalizeWaiterState,
+  parseJukeboxExternalTrack,
   positionToSector,
 } from '@social-square/shared';
 import type {
@@ -621,6 +622,7 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         next = {
           ...current,
           trackId: nextJukeboxTrackId(current.trackId),
+          externalTrack: undefined,
           playing: true,
           startedAt: now,
           updatedAt: now,
@@ -633,6 +635,21 @@ export function registerRoomHandlers(io: IoServer, socket: IoSocket): void {
         next = {
           ...current,
           trackId,
+          externalTrack: undefined,
+          playing: true,
+          startedAt: now,
+          updatedAt: now,
+          requestedBy: username,
+        };
+      } else if (action === 'jukebox-play-url') {
+        const externalTrack = parseJukeboxExternalTrack(payload?.url);
+        if (!externalTrack) {
+          socket.emit('error', { code: 'INVALID_MEDIA_URL', message: 'Link YouTube non valido' });
+          return;
+        }
+        next = {
+          ...current,
+          externalTrack,
           playing: true,
           startedAt: now,
           updatedAt: now,

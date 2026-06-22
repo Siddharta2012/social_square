@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
-import { CHAT_MAX_LENGTH, ORDER_ITEMS, PETAL_ACTION_COST, normalizeChatText, orderItemLabel } from '@social-square/shared';
+import {
+  CHAT_MAX_LENGTH,
+  ORDER_ITEMS,
+  PETAL_ACTION_COST,
+  normalizeChatText,
+  orderItemLabel,
+  parseJukeboxExternalTrack,
+} from '@social-square/shared';
 import type { EmoteId } from '@social-square/shared';
 import { useGameStore } from '../store/gameStore';
 import { useUserStore } from '../store/userStore';
@@ -39,6 +46,9 @@ export const HUD: React.FC = () => {
   const username = useUserStore((s) => s.username);
   const setUser = useUserStore((s) => s.setUser);
   const [chatDraft, setChatDraft] = useState('');
+  const [showJukeboxLink, setShowJukeboxLink] = useState(false);
+  const [jukeboxUrlDraft, setJukeboxUrlDraft] = useState('');
+  const [jukeboxUrlError, setJukeboxUrlError] = useState('');
 
   const inRoom = currentRoomId !== null;
   const travelOptions = fastTravelLocations();
@@ -69,6 +79,23 @@ export const HUD: React.FC = () => {
     if (!text) return;
     eventBus.emit('chat-send', text);
     setChatDraft('');
+  };
+
+  const submitJukeboxUrl = () => {
+    if (!canUseJukebox) {
+      setJukeboxUrlError('Avvicinati al jukebox');
+      return;
+    }
+    const url = jukeboxUrlDraft.trim();
+    if (!parseJukeboxExternalTrack(url)) {
+      setJukeboxUrlError('Link YouTube non valido');
+      return;
+    }
+
+    eventBus.emit('jukebox-play-url', url);
+    setJukeboxUrlDraft('');
+    setJukeboxUrlError('');
+    setShowJukeboxLink(false);
   };
 
   const waiterIsMine = waiterStatus?.customerId === userId;
@@ -230,6 +257,17 @@ export const HUD: React.FC = () => {
               >
                 Next
               </button>
+              <button
+                style={{ ...smallButtonStyle, ...(!canUseJukebox ? disabledButtonStyle : {}) }}
+                disabled={!canUseJukebox}
+                title={canUseJukebox ? 'Incolla link YouTube' : 'Avvicinati al jukebox'}
+                onClick={() => {
+                  setJukeboxUrlError('');
+                  setShowJukeboxLink(!showJukeboxLink);
+                }}
+              >
+                Link
+              </button>
             </div>
 
             <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
@@ -361,6 +399,80 @@ export const HUD: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {inRoom && showJukeboxLink && (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitJukeboxUrl();
+          }}
+          style={{
+            position: 'absolute',
+            right: '16px',
+            bottom: '52px',
+            zIndex: 126,
+            width: 'min(360px, calc(100vw - 32px))',
+            background: 'rgba(10,10,30,0.94)',
+            border: '1px solid rgba(150,150,255,0.35)',
+            borderRadius: '6px',
+            padding: '9px',
+            display: 'grid',
+            gridTemplateColumns: '1fr auto auto',
+            gap: '7px',
+            alignItems: 'center',
+            pointerEvents: 'auto',
+            boxShadow: '0 10px 24px rgba(0,0,0,0.32)',
+          }}
+        >
+          <input
+            value={jukeboxUrlDraft}
+            onChange={(event) => {
+              setJukeboxUrlDraft(event.target.value);
+              setJukeboxUrlError('');
+            }}
+            placeholder="https://youtube.com/watch?v=..."
+            style={{
+              minWidth: 0,
+              height: '28px',
+              boxSizing: 'border-box',
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(150,150,255,0.32)',
+              borderRadius: '4px',
+              color: '#e0e0ff',
+              fontFamily: 'monospace',
+              fontSize: '11px',
+              padding: '0 8px',
+              outline: 'none',
+            }}
+          />
+          <button
+            type="submit"
+            style={{ ...smallButtonStyle, ...(!canUseJukebox ? disabledButtonStyle : {}) }}
+            disabled={!canUseJukebox}
+          >
+            Suona
+          </button>
+          <button
+            type="button"
+            style={smallButtonStyle}
+            onClick={() => {
+              setShowJukeboxLink(false);
+              setJukeboxUrlError('');
+            }}
+          >
+            X
+          </button>
+          {jukeboxUrlError && (
+            <span style={{
+              gridColumn: '1 / -1',
+              color: '#ff8888',
+              fontSize: '10px',
+            }}>
+              {jukeboxUrlError}
+            </span>
+          )}
+        </form>
       )}
 
       {inRoom && userActionMenu && (

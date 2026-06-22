@@ -11,6 +11,7 @@ import {
   nextJukeboxTrackId,
   normalizeJukeboxState,
   normalizeWaiterState,
+  parseJukeboxExternalTrack,
 } from '@social-square/shared';
 import type {
   AvatarConfig,
@@ -263,6 +264,7 @@ export class BarScene extends BaseRoomScene {
     eventBus.on('waiter-order', (item: OrderItemId) => this._placeWaiterOrder(item), this);
     eventBus.on('fast-travel', (locationId: LocationId) => this._fastTravel(locationId), this);
     eventBus.on('voice-user-mute', (userId: string, muted: boolean) => this._setRemoteVoiceMuted(userId, muted), this);
+    eventBus.on('jukebox-play-url', (url: string) => this._requestJukeboxPlayUrl(url), this);
     useGameStore.getState().clearChatMessages();
 
     this._createStations();
@@ -777,6 +779,7 @@ export class BarScene extends BaseRoomScene {
     const next: JukeboxState = {
       ...this._jukeboxState,
       trackId: nextJukeboxTrackId(this._jukeboxState.trackId),
+      externalTrack: undefined,
       playing: true,
       startedAt: now,
       updatedAt: now,
@@ -786,17 +789,44 @@ export class BarScene extends BaseRoomScene {
     this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-next');
   }
 
+  private _requestJukeboxPlayUrl(url: string): void {
+    if (!this._isNear(JUKEBOX_POSITION)) {
+      this._showNotice('Avvicinati al jukebox');
+      return;
+    }
+
+    const externalTrack = parseJukeboxExternalTrack(url);
+    if (!externalTrack) {
+      this._showNotice('Link YouTube non valido');
+      return;
+    }
+
+    const now = Date.now();
+    const next: JukeboxState = {
+      ...this._jukeboxState,
+      externalTrack,
+      playing: true,
+      startedAt: now,
+      updatedAt: now,
+      requestedBy: useUserStore.getState().username ?? undefined,
+    };
+    void this._applyJukeboxState(next);
+    this._network?.emitInteract(JUKEBOX_OBJECT_ID, 'jukebox-play-url', { url });
+  }
+
   private async _applyJukeboxState(rawState: unknown): Promise<void> {
     const state = normalizeJukeboxState(rawState);
     this._jukeboxState = state;
     const result = await this._jukebox.applyState(state);
     useGameStore.getState().setJukeboxStatus({
       trackId: state.trackId,
-      title: jukeboxTitle(state.trackId),
+      title: state.externalTrack?.title ?? jukeboxTitle(state.trackId),
       playing: state.playing,
       blocked: result.blocked,
+      source: state.externalTrack?.provider ?? 'local',
+      externalUrl: state.externalTrack?.url,
     });
-    if (result.blocked) this._showNotice('Clicca Play sul jukebox per abilitare audio');
+    if (result.blocked) this._showNotice('Clicca Play nel player del jukebox');
   }
 
   private _applyObjectState(objectId: string, objectState: ObjectState): void {
@@ -1108,6 +1138,7 @@ export class BarScene extends BaseRoomScene {
     eventBus.off('waiter-order');
     eventBus.off('fast-travel');
     eventBus.off('voice-user-mute');
+    eventBus.off('jukebox-play-url');
     this.input.keyboard?.off('keydown-B');
     this.input.keyboard?.off('keydown-ONE');
     this.input.keyboard?.off('keydown-TWO');
