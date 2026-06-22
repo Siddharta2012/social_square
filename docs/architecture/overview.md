@@ -30,5 +30,5 @@ Petal collection uses request IDs so optimistic UI can reconcile exact failures.
 
 ## State
 
-Redis stores transient room state and persistent account records. Postgres schema
-migrations are available for the relational baseline. See `state.md`.
+Redis stores transient room state only. Postgres stores durable accounts,
+profiles, wallet balances, and ledger entries. See `state.md`.

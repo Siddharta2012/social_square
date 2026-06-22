@@ -17,7 +17,7 @@ Known invariant: every petal collect error that can clear an optimistic pending
 entry emits the original `requestId`.
 
 Deploy/runtime guardrail: profile reads and wallet mutations repair `users.petals`
-from the ledger if the ledger is ahead. During the Redis-to-Postgres transition,
-legacy Redis account data is reconciled idempotently via `redis-import:<userId>`
-or `legacy-redis:<userId>` refs so an existing Postgres row at zero is not left
-behind.
+from the ledger if the ledger is ahead. Legacy Redis account blobs are imported
+only through the documented one-shot `pnpm --filter server import:redis-users`
+script before cutover; runtime services do not read account or wallet fields from
+Redis.
