@@ -5,11 +5,13 @@ import {
   PETAL_BURST_COUNT,
   PETAL_PENDING_TIMEOUT_MS,
   acceptPetalServerTotal,
+  adjustPetals,
   collectPetalBloom,
   confirmPetalCollected,
   petalCollectRequestId,
   removeOptimisticPetalCredit,
   rollbackPendingPetalCollect,
+  setPetalTotal,
   spawnPetalBloom,
   spawnPetalCollectBurst,
   sweepStalePetalCollects,
@@ -265,5 +267,35 @@ describe('spawnPetalCollectBurst', () => {
     (ctx as any).tweens = { add: ({ onComplete }: any) => { onComplete?.(); return {}; } };
     spawnPetalCollectBurst.call(ctx as unknown as BarSceneContext, TEST_PETAL_POINT, 25);
     expect(created.length).toBeLessThanOrEqual(PETAL_BURST_COUNT + 1);
+  });
+});
+
+describe('petal balance helpers', () => {
+  beforeEach(() => { useGameStore.getState().setPetals(0); });
+
+  it('adjustPetals adds delta to store', () => {
+    adjustPetals(25);
+    expect(useGameStore.getState().petals).toBe(25);
+  });
+
+  it('adjustPetals clamps at zero (cannot go negative)', () => {
+    useGameStore.getState().setPetals(10);
+    adjustPetals(-999);
+    expect(useGameStore.getState().petals).toBe(0);
+  });
+
+  it('setPetalTotal sets absolute value clamped at zero', () => {
+    setPetalTotal(500);
+    expect(useGameStore.getState().petals).toBe(500);
+    setPetalTotal(-1);
+    expect(useGameStore.getState().petals).toBe(0);
+  });
+
+  it('removeOptimisticPetalCredit cannot drive balance below zero', () => {
+    const ctx = petalContext();
+    useGameStore.getState().setPetals(10);
+    const p = pending(TEST_PETAL_POINT, 999); // amount bigger than balance
+    removeOptimisticPetalCredit.call(ctx as unknown as BarSceneContext, p);
+    expect(useGameStore.getState().petals).toBe(0); // clamped
   });
 });

@@ -44,6 +44,17 @@ export const PETAL_RETRY_COOLDOWN_MS = 1500;
 export const PETAL_SPAWN_TICK_MS = 3000;
 export { PETAL_AUTO_COLLECT_CHECK_MS };
 
+/** Apply a relative delta to the petal balance, clamped to ≥0. */
+export function adjustPetals(delta: number): void {
+  const store = useGameStore.getState();
+  store.setPetals(Math.max(0, store.petals + delta));
+}
+
+/** Set the petal balance to an absolute total, clamped to ≥0. */
+export function setPetalTotal(total: number): void {
+  useGameStore.getState().setPetals(Math.max(0, total));
+}
+
 export function petalCollectRequestId(pointKey: string): string {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (uuid) return `${pointKey}:${uuid}`;
@@ -183,7 +194,7 @@ export function collectPetalBloom(this: BarSceneContext, bloom: PetalBloom, auto
   });
   this._removePetalBloom(bloom);
   if (amount > 0) {
-    useGameStore.getState().setPetals(useGameStore.getState().petals + amount);
+    adjustPetals(+amount);
     this._spawnPetalCollectBurst(bloom.position, amount);
     this._playPetalCollectSound();
   }
@@ -292,17 +303,17 @@ export function forgetPendingPetalCollect(this: BarSceneContext, requestId: stri
 
 export function removeOptimisticPetalCredit(this: BarSceneContext, pending: PendingPetalCollect): void {
   if (pending.amount <= 0) return;
-  useGameStore.getState().setPetals(useGameStore.getState().petals - pending.amount);
+  adjustPetals(-pending.amount);
 }
 
 export function applyServerPetals(this: BarSceneContext, petals: number): void {
-  useGameStore.getState().setPetals(petals + this._pendingPetalValue());
+  setPetalTotal(petals + this._pendingPetalValue());
 }
 
 export function acceptPetalServerTotal(this: BarSceneContext, petals: number): void {
   const store = useGameStore.getState();
   const serverWithLocalPending = petals + this._pendingPetalValue();
-  store.setPetals(Math.max(store.petals, serverWithLocalPending));
+  setPetalTotal(Math.max(store.petals, serverWithLocalPending));
 }
 
 export function pendingPetalValue(this: BarSceneContext): number {
