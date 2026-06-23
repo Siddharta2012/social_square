@@ -2,6 +2,7 @@ import { PETAL_SPAWN_CONFIGS, petalPointKey, type Position } from '@social-squar
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGameStore } from '../../../store/gameStore';
 import {
+  PETAL_BURST_COUNT,
   PETAL_PENDING_TIMEOUT_MS,
   acceptPetalServerTotal,
   collectPetalBloom,
@@ -10,6 +11,7 @@ import {
   removeOptimisticPetalCredit,
   rollbackPendingPetalCollect,
   spawnPetalBloom,
+  spawnPetalCollectBurst,
   sweepStalePetalCollects,
   type PendingPetalCollect,
   type PetalBloom,
@@ -247,5 +249,21 @@ describe('optimistic petal lifecycle invariants', () => {
     );
     // Server said total is 999; pending is 0; so store should reflect ≥999
     expect(useGameStore.getState().petals).toBeGreaterThanOrEqual(999);
+  });
+});
+
+describe('spawnPetalCollectBurst', () => {
+  it('creates at most PETAL_BURST_COUNT + 1 display objects', () => {
+    const ctx = petalContext();
+    const created: unknown[] = [];
+    const stub = () => ({ fillStyle: vi.fn().mockReturnThis(), fillEllipse: vi.fn().mockReturnThis(), setDepth: vi.fn().mockReturnThis(), setRotation: vi.fn().mockReturnThis(), destroy: vi.fn(), x: 0, y: 0 });
+    const textStub = () => ({ setOrigin: vi.fn().mockReturnThis(), setDepth: vi.fn().mockReturnThis(), destroy: vi.fn(), x: 0, y: 0 });
+    (ctx as any).add = {
+      graphics: () => { const g = stub(); created.push(g); return g; },
+      text: () => { const t = textStub(); created.push(t); return t; },
+    };
+    (ctx as any).tweens = { add: ({ onComplete }: any) => { onComplete?.(); return {}; } };
+    spawnPetalCollectBurst.call(ctx as unknown as BarSceneContext, TEST_PETAL_POINT, 25);
+    expect(created.length).toBeLessThanOrEqual(PETAL_BURST_COUNT + 1);
   });
 });

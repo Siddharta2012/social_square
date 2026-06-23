@@ -26,6 +26,17 @@ export interface PendingPetalCollect {
   serverCheckTimedOut?: boolean;
 }
 
+export const PETAL_BURST_COUNT = 6;
+
+const PETAL_BURST_TEXT_STYLE = {
+  fontSize: '18px',
+  color: '#fff4d0',
+  fontFamily: 'monospace',
+  fontStyle: 'bold',
+  stroke: '#1a1206',
+  strokeThickness: 4,
+} as const;
+
 export const PETAL_COLLECT_RADIUS_TILES = 2.75;
 export const PETAL_AUTO_COLLECT_RADIUS_TILES = 1.35;
 export const PETAL_PENDING_TIMEOUT_MS = 6000;
@@ -306,14 +317,14 @@ export function spawnPetalCollectBurst(this: BarSceneContext, position: Position
   const iso = IsometricSystem.worldToIso(position.x, position.y);
   const colors = [0xffd166, 0xe85d75, 0x9b7cff, 0xffffff, 0x88ffbb];
 
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < PETAL_BURST_COUNT; i++) {
     const petal = this.add.graphics({ x: iso.x, y: iso.y - 22 });
     petal.fillStyle(colors[i % colors.length], 1);
     petal.fillEllipse(0, 0, 8, 4);
     petal.setDepth(IsometricSystem.depth(position.x, position.y) + 8);
-    petal.setRotation((Math.PI * 2 * i) / 10);
+    petal.setRotation((Math.PI * 2 * i) / PETAL_BURST_COUNT);
 
-    const angle = (Math.PI * 2 * i) / 10;
+    const angle = (Math.PI * 2 * i) / PETAL_BURST_COUNT;
     const distance = 24 + (i % 3) * 8;
     this.tweens.add({
       targets: petal,
@@ -328,14 +339,7 @@ export function spawnPetalCollectBurst(this: BarSceneContext, position: Position
   }
 
   const text = this.add
-    .text(iso.x, iso.y - 46, `+${amount}`, {
-      fontSize: '18px',
-      color: '#fff4d0',
-      fontFamily: 'monospace',
-      fontStyle: 'bold',
-      stroke: '#1a1206',
-      strokeThickness: 4,
-    })
+    .text(iso.x, iso.y - 46, `+${amount}`, PETAL_BURST_TEXT_STYLE)
     .setOrigin(0.5)
     .setDepth(IsometricSystem.depth(position.x, position.y) + 9);
 
