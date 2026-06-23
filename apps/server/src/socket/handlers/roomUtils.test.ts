@@ -1,5 +1,5 @@
 import { Direction } from '@social-square/shared';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { state } from './roomContext';
 import { currentRoomUserForInteraction, ensureUserNear } from './roomUtils';
 import type { AvatarConfig } from '@social-square/shared';
@@ -38,8 +38,9 @@ describe('room interaction position hints', () => {
     });
 
     expect(user?.position).toEqual({ x: 16, y: 3 });
+    // The hint is NOT persisted — the stored position stays at the original value.
     await expect(currentRoomUserForInteraction(roomId, userId)).resolves.toMatchObject({
-      position: { x: 16, y: 3 },
+      position: { x: 0, y: 0 },
     });
   });
 
@@ -68,5 +69,31 @@ describe('room interaction position hints', () => {
 
     expect(user?.position).toEqual({ x: 16, y: 3 });
     expect(errors).toEqual([]);
+  });
+
+  it('currentRoomUserForInteraction uses position hint for check only, does not persist it', async () => {
+    await state.addUser(roomId, {
+      userId,
+      avatarConfig,
+      username: 'Tester',
+      position: { x: 5, y: 5 },
+      state: 'idle',
+    });
+
+    const updatePositionSpy = vi.spyOn(state, 'updatePosition');
+
+    const user = await currentRoomUserForInteraction(roomId, userId, {
+      playerX: 99,
+      playerY: 99,
+    });
+
+    // The returned user carries the hinted position for proximity checks.
+    expect(user?.position).toEqual({ x: 99, y: 99 });
+
+    // The hint must NOT be written back to state — it would let clients
+    // teleport their server-side position through interaction payloads.
+    expect(updatePositionSpy).not.toHaveBeenCalled();
+
+    updatePositionSpy.mockRestore();
   });
 });

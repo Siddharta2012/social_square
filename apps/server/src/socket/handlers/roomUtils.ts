@@ -97,7 +97,10 @@ export async function currentRoomUserForInteraction(
   if (!user) return null;
   const hintedPosition = positionHintFromPayload(payload);
   if (!hintedPosition) return user;
-  await state.updatePosition(roomId, userId, hintedPosition);
+  // Use the hint for proximity checks only — the authoritative position is
+  // updated via the throttled 'move' channel which the client fires before
+  // each interaction. Writing back the client hint would let clients
+  // teleport their server-side position through interaction payloads.
   return { ...user, position: hintedPosition };
 }
 
