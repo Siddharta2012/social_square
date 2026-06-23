@@ -282,3 +282,11 @@ failed before. Diff scoped to the objective. PR body lists what was verified.
   for tests/local dev.
 - **Economy goes through one transactional, idempotent, ledgered path** (O2). No
   handler may mutate `petals` directly; shop/quests/events reuse it.
+
+---
+
+## Sub-plans
+
+The following focused implementation plans detail specific work tracked in this document:
+
+- [Stability & Coherence Hardening](../superpowers/plans/2026-06-22-stability-coherence.md) — restores type safety in BarScene, hardens optimistic petal sync, fixes resource leaks, reduces per-frame allocation, and eliminates client-trusted position writes. Tracks P0/P1/P2 stability work on branch `fix/stability-coherence`.
