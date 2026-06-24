@@ -1,0 +1,8 @@
+node_modules
+**/node_modules
+**/dist
+.git
+*.log
+typecheck-output.txt
+.env
+**/.env

@@ -1,6 +1,8 @@
-# Build: shared -> client -> server. Client dist is served statically by the server.
+# Build via Dockerfile (deterministic pnpm monorepo build). Railpack kept
+# defaulting to `npm install`, which cannot resolve workspace:* deps.
 [build]
-buildCommand = "pnpm install && pnpm --filter shared build && pnpm --filter client build && pnpm --filter server build"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 # Deploy gate checks LIVENESS (/api/health, always 200 when the process serves
 # HTTP), not deep readiness (/api/ready depends on DB+Redis and can 503 during a
