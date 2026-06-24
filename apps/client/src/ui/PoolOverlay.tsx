@@ -81,14 +81,6 @@ export const PoolOverlay: React.FC<PoolOverlayProps> = ({ isCompact }) => {
   useEffect(() => {
     if (pool.lastShot?.shotId && pool.lastShot.shotId !== processedShotRef.current) {
       processedShotRef.current = pool.lastShot.shotId;
-      const nextBalls = pool.balls.map((ball) => ({ ...ball }));
-      ballsRef.current = nextBalls;
-      setBalls(nextBalls);
-      if (pool.lastOutcome) {
-        syncingShotRef.current = null;
-        setMoving(false);
-        return;
-      }
       syncingShotRef.current = pool.lastShot.userId === userId ? pool.lastShot.shotId : null;
       applyShot(pool.lastShot);
       return;
