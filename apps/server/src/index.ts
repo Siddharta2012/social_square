@@ -15,7 +15,7 @@ import { isLiveKitConfigured } from './services/VoiceService';
 import { createSocketServer } from './socket/socketServer';
 import { installGlobalErrorHandlers } from './utils/errorReporter';
 import { requireAdmin, securityHeaders } from './utils/httpSecurity';
-import { logInfo, logWarn } from './utils/logger';
+import { logError, logInfo, logWarn } from './utils/logger';
 import { metricsSnapshot } from './utils/metrics';
 
 installGlobalErrorHandlers();
@@ -163,6 +163,16 @@ if (!env.USE_REDIS_MOCK) {
   });
 }
 
-httpServer.listen(env.PORT, () => {
-  logInfo('server.started', { port: env.PORT, healthUrl: `http://localhost:${env.PORT}/api/health` });
+// Surface listen failures loudly — without this handler a bind error (e.g. the
+// wrong port) crashes the process with no log, which looks like a silent hang.
+httpServer.on('error', (err: NodeJS.ErrnoException) => {
+  logError('server.listen_failed', { port: env.PORT, code: err.code, message: err.message });
+  process.exit(1);
+});
+
+// Bind to 0.0.0.0 explicitly: Railway's healthcheck reaches the container over
+// IPv4, but Node's default listen binds to the IPv6 wildcard (::), which can be
+// unreachable and make /api/health time out even though the server is "up".
+httpServer.listen(env.PORT, '0.0.0.0', () => {
+  logInfo('server.started', { port: env.PORT, host: '0.0.0.0' });
 });
